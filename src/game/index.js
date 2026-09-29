@@ -9,3 +9,4 @@ export * from './consumers.js';
 export * from './payoff.js';
 export * from './city.js';
 export * from './strategies.js';
+export * from './equilibrium.js';

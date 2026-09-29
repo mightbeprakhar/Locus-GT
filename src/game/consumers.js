@@ -70,14 +70,15 @@ export function chooseRestaurant(consumer, restaurantA, restaurantB, config = DE
  * demandA + demandB === totalPopulation
  *
  * @param {Array<{x: number, y: number, population: number}>|{cells: Array<{x: number, y: number, population: number}>}} city
- * @param {{x: number, y: number, price: number}} restaurantA
- * @param {{x: number, y: number, price: number}} restaurantB
+ * @param {{x: number, y: number, price: number}|{location: {x: number, y: number}, price: number}} restaurantA
+ * @param {{x: number, y: number, price: number}|{location: {x: number, y: number}, price: number}} restaurantB
  * @param {{V?: number, alpha?: number}} [config=DEFAULT_PARAMS]
+ * @param {{includeAllocations?: boolean}} [options={}]
  * @returns {{
  *   demandA: number,
  *   demandB: number,
  *   totalPopulation: number,
- *   allocations: Array<{
+ *   allocations?: Array<{
  *     x: number,
  *     y: number,
  *     population: number,
@@ -87,17 +88,18 @@ export function chooseRestaurant(consumer, restaurantA, restaurantB, config = DE
  *   }>
  * }}
  */
-export function calculateDemand(city, restaurantA, restaurantB, config = DEFAULT_PARAMS) {
+export function calculateDemand(city, restaurantA, restaurantB, config = DEFAULT_PARAMS, options = {}) {
   const cells = Array.isArray(city) ? city : (city?.cells ?? []);
 
   if (!cells || cells.length === 0) {
     throw new Error('Invalid city: must provide a non-empty array of cells or an object with cells array.');
   }
 
+  const includeAllocations = options?.includeAllocations ?? true;
   let demandA = 0;
   let demandB = 0;
   let totalPopulation = 0;
-  const allocations = [];
+  const allocations = includeAllocations ? [] : undefined;
 
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i];
@@ -111,20 +113,76 @@ export function calculateDemand(city, restaurantA, restaurantB, config = DEFAULT
     demandA += cellDemandA;
     demandB += cellDemandB;
 
-    allocations.push({
-      x: cell.x,
-      y: cell.y,
-      population: pop,
-      choice: outcome.choice,
-      demandA: cellDemandA,
-      demandB: cellDemandB,
-    });
+    if (includeAllocations) {
+      allocations.push({
+        x: cell.x,
+        y: cell.y,
+        population: pop,
+        choice: outcome.choice,
+        demandA: cellDemandA,
+        demandB: cellDemandB,
+      });
+    }
   }
 
-  return {
+  const result = {
     demandA,
     demandB,
     totalPopulation,
-    allocations,
   };
+
+  if (includeAllocations) {
+    result.allocations = allocations;
+  }
+
+  return result;
 }
+
+/**
+ * High-performance, zero-allocation demand calculation for large simulation loops.
+ * Avoids object allocation and intermediate closures while guaranteeing identical mathematical behavior.
+ *
+ * @param {Array<{x: number, y: number, population: number}>} cells
+ * @param {{x: number, y: number}} locA - Location of restaurant A
+ * @param {number} priceA - Price of restaurant A
+ * @param {{x: number, y: number}} locB - Location of restaurant B
+ * @param {number} priceB - Price of restaurant B
+ * @param {number} V - Baseline consumer valuation
+ * @param {number} alpha - Travel sensitivity
+ * @returns {{demandA: number, demandB: number}}
+ */
+export function calculateDemandFast(cells, locA, priceA, locB, priceB, V, alpha) {
+  let demandA = 0;
+  let demandB = 0;
+  const len = cells.length;
+  const ax = locA.x;
+  const ay = locA.y;
+  const bx = locB.x;
+  const by = locB.y;
+
+  for (let i = 0; i < len; i++) {
+    const cell = cells[i];
+    const pop = cell.population;
+    const cx = cell.x;
+    const cy = cell.y;
+
+    const distA = Math.hypot(cx - ax, cy - ay);
+    const distB = Math.hypot(cx - bx, cy - by);
+
+    const uA = V - priceA - alpha * distA;
+    const uB = V - priceB - alpha * distB;
+    const diff = uA - uB;
+
+    if (Math.abs(diff) <= FLOAT_EPSILON) {
+      demandA += pop * 0.5;
+      demandB += pop * 0.5;
+    } else if (diff > 0) {
+      demandA += pop;
+    } else {
+      demandB += pop;
+    }
+  }
+
+  return { demandA, demandB };
+}
+
