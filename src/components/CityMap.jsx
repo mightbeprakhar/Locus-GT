@@ -1,7 +1,7 @@
 /**
  * @file CityMap.jsx
  * @description Spatial simulation view displaying customer zones, population density,
- * market capture, and restaurant locations.
+ * market capture, restaurant locations, and selected equilibrium previews.
  */
 
 import { useState, useMemo, Fragment } from 'react';
@@ -16,6 +16,7 @@ import { distance } from '../game/utility.js';
  * @param {'A'|'B'} props.selectedRestaurant
  * @param {(location: {x: number, y: number}) => void} props.onSelectLocation
  * @param {Object} props.evaluation
+ * @param {Object|null} [props.selectedEquilibrium] - Optional equilibrium to preview on the map
  */
 export default function CityMap({
   city,
@@ -24,6 +25,7 @@ export default function CityMap({
   selectedRestaurant,
   onSelectLocation,
   evaluation,
+  selectedEquilibrium = null,
 }) {
   const [hoveredCell, setHoveredCell] = useState(null);
 
@@ -56,6 +58,9 @@ export default function CityMap({
 
   const locA = strategyA.location;
   const locB = strategyB.location;
+
+  const eqLocA = selectedEquilibrium?.strategyA?.location;
+  const eqLocB = selectedEquilibrium?.strategyB?.location;
 
   const activeName = selectedRestaurant === 'A' ? 'Restaurant A' : 'Restaurant B';
   const activeColor = selectedRestaurant === 'A' ? 'text-sky-400' : 'text-rose-400';
@@ -126,13 +131,17 @@ export default function CityMap({
                 const isB = locB.x === x && locB.y === y;
                 const isBoth = isA && isB;
 
+                const isEqA = eqLocA && eqLocA.x === x && eqLocA.y === y;
+                const isEqB = eqLocB && eqLocB.x === x && eqLocB.y === y;
+                const isEqBoth = isEqA && isEqB;
+
                 // Normalized density ratio (0 to 1)
                 const popRatio =
                   maxPop > minPop ? (cell.population - minPop) / (maxPop - minPop) : 0.5;
 
                 // Market capture dot styling
                 let marketDot = null;
-                if (alloc && !isA && !isB && !isBoth) {
+                if (alloc && !isA && !isB && !isBoth && !isEqA && !isEqB) {
                   if (alloc.choice === 'A') {
                     marketDot = 'bg-sky-400/60';
                   } else if (alloc.choice === 'B') {
@@ -155,24 +164,29 @@ export default function CityMap({
                     onBlur={() => setHoveredCell(null)}
                     aria-label={`Zone (${x}, ${y}), population ${cell.population}${
                       isA ? ', Restaurant A' : ''
-                    }${isB ? ', Restaurant B' : ''}`}
+                    }${isB ? ', Restaurant B' : ''}${
+                      isEqA ? ', Equilibrium A target' : ''
+                    }${isEqB ? ', Equilibrium B target' : ''}`}
                     className={`relative w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded border transition-colors flex items-center justify-center cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 ${
                       isCellHovered
                         ? 'border-slate-500 z-10'
+                        : isEqA || isEqB
+                        ? 'border-slate-700'
                         : 'border-slate-800/60 hover:border-slate-700'
                     }`}
                     style={{
                       backgroundColor: `rgba(30, 41, 59, ${0.15 + popRatio * 0.45})`,
                     }}
                   >
-                    {/* Restaurant Markers */}
+                    {/* Active Restaurant Markers & Equilibrium Previews */}
                     {isBoth ? (
                       <div className="flex items-center gap-0.5">
                         <motion.div
                           layoutId="marker-both-A"
                           className={`w-4 h-4 sm:w-5 sm:h-5 rounded bg-sky-600 text-white font-bold text-[10px] flex items-center justify-center ${
                             selectedRestaurant === 'A' ? 'ring-1 ring-sky-300' : ''
-                          }`}
+                          } ${isEqA ? 'ring-2 ring-emerald-400/90' : ''}`}
+                          title={`Restaurant A${isEqA ? ' (at equilibrium location)' : ''}`}
                         >
                           A
                         </motion.div>
@@ -180,29 +194,81 @@ export default function CityMap({
                           layoutId="marker-both-B"
                           className={`w-4 h-4 sm:w-5 sm:h-5 rounded bg-rose-600 text-white font-bold text-[10px] flex items-center justify-center ${
                             selectedRestaurant === 'B' ? 'ring-1 ring-rose-300' : ''
-                          }`}
+                          } ${isEqB ? 'ring-2 ring-emerald-400/90' : ''}`}
+                          title={`Restaurant B${isEqB ? ' (at equilibrium location)' : ''}`}
                         >
                           B
                         </motion.div>
                       </div>
                     ) : isA ? (
-                      <motion.div
-                        layoutId="marker-A"
-                        className={`w-6 h-6 sm:w-7 sm:h-7 rounded bg-sky-600 text-white font-bold text-xs flex items-center justify-center ${
-                          selectedRestaurant === 'A' ? 'ring-2 ring-sky-300' : ''
-                        }`}
-                      >
-                        A
-                      </motion.div>
+                      <div className="flex items-center gap-0.5">
+                        <motion.div
+                          layoutId="marker-A"
+                          className={`w-6 h-6 sm:w-7 sm:h-7 rounded bg-sky-600 text-white font-bold text-xs flex items-center justify-center ${
+                            selectedRestaurant === 'A' ? 'ring-2 ring-sky-300' : ''
+                          } ${isEqA ? 'ring-2 ring-emerald-400/90' : ''}`}
+                          title={`Restaurant A${isEqA ? ' (at equilibrium location)' : ''}`}
+                        >
+                          A
+                        </motion.div>
+                        {isEqB && (
+                          <div
+                            className="w-4 h-4 sm:w-5 sm:h-5 rounded border border-dashed border-rose-400 bg-rose-950/60 text-rose-300 font-bold text-[10px] flex items-center justify-center"
+                            title={`Equilibrium #${selectedEquilibrium?.id}: Restaurant B target`}
+                          >
+                            B*
+                          </div>
+                        )}
+                      </div>
                     ) : isB ? (
-                      <motion.div
-                        layoutId="marker-B"
-                        className={`w-6 h-6 sm:w-7 sm:h-7 rounded bg-rose-600 text-white font-bold text-xs flex items-center justify-center ${
-                          selectedRestaurant === 'B' ? 'ring-2 ring-rose-300' : ''
-                        }`}
+                      <div className="flex items-center gap-0.5">
+                        <motion.div
+                          layoutId="marker-B"
+                          className={`w-6 h-6 sm:w-7 sm:h-7 rounded bg-rose-600 text-white font-bold text-xs flex items-center justify-center ${
+                            selectedRestaurant === 'B' ? 'ring-2 ring-rose-300' : ''
+                          } ${isEqB ? 'ring-2 ring-emerald-400/90' : ''}`}
+                          title={`Restaurant B${isEqB ? ' (at equilibrium location)' : ''}`}
+                        >
+                          B
+                        </motion.div>
+                        {isEqA && (
+                          <div
+                            className="w-4 h-4 sm:w-5 sm:h-5 rounded border border-dashed border-sky-400 bg-sky-950/60 text-sky-300 font-bold text-[10px] flex items-center justify-center"
+                            title={`Equilibrium #${selectedEquilibrium?.id}: Restaurant A target`}
+                          >
+                            A*
+                          </div>
+                        )}
+                      </div>
+                    ) : isEqBoth ? (
+                      <div className="flex items-center gap-0.5">
+                        <div
+                          className="w-4 h-4 sm:w-5 sm:h-5 rounded border border-dashed border-sky-400 bg-sky-950/60 text-sky-300 font-bold text-[10px] flex items-center justify-center"
+                          title={`Equilibrium #${selectedEquilibrium?.id}: Restaurant A target`}
+                        >
+                          A*
+                        </div>
+                        <div
+                          className="w-4 h-4 sm:w-5 sm:h-5 rounded border border-dashed border-rose-400 bg-rose-950/60 text-rose-300 font-bold text-[10px] flex items-center justify-center"
+                          title={`Equilibrium #${selectedEquilibrium?.id}: Restaurant B target`}
+                        >
+                          B*
+                        </div>
+                      </div>
+                    ) : isEqA ? (
+                      <div
+                        className="w-6 h-6 sm:w-7 sm:h-7 rounded border-2 border-dashed border-sky-400 bg-sky-950/60 text-sky-300 font-bold text-xs flex items-center justify-center shadow-sm select-none"
+                        title={`Equilibrium #${selectedEquilibrium?.id}: Restaurant A target (${x}, ${y})`}
                       >
-                        B
-                      </motion.div>
+                        A*
+                      </div>
+                    ) : isEqB ? (
+                      <div
+                        className="w-6 h-6 sm:w-7 sm:h-7 rounded border-2 border-dashed border-rose-400 bg-rose-950/60 text-rose-300 font-bold text-xs flex items-center justify-center shadow-sm select-none"
+                        title={`Equilibrium #${selectedEquilibrium?.id}: Restaurant B target (${x}, ${y})`}
+                      >
+                        B*
+                      </div>
                     ) : (
                       marketDot && (
                         <span
@@ -243,6 +309,24 @@ export default function CityMap({
             <span className="text-slate-500 font-mono text-[11px]">
               d(A)={distance(hoveredCell, locA).toFixed(1)}, d(B)={distance(hoveredCell, locB).toFixed(1)}
             </span>
+            {eqLocA && hoveredCell.x === eqLocA.x && hoveredCell.y === eqLocA.y && (
+              <span className="text-sky-300 font-medium text-[11px]">
+                [Eq #{selectedEquilibrium?.id} A* target]
+              </span>
+            )}
+            {eqLocB && hoveredCell.x === eqLocB.x && hoveredCell.y === eqLocB.y && (
+              <span className="text-rose-300 font-medium text-[11px]">
+                [Eq #{selectedEquilibrium?.id} B* target]
+              </span>
+            )}
+          </div>
+        ) : selectedEquilibrium ? (
+          <div className="text-slate-300 flex items-center gap-2 flex-wrap">
+            <span className="text-slate-400">{`Inspecting Eq #${selectedEquilibrium.id}:`}</span>
+            <span className="font-mono text-sky-300">{`A*(${eqLocA?.x}, ${eqLocA?.y})`}</span>
+            <span className="text-slate-600">·</span>
+            <span className="font-mono text-rose-300">{`B*(${eqLocB?.x}, ${eqLocB?.y})`}</span>
+            <span className="text-slate-500 text-[11px]">(Click any cell to relocate {activeName})</span>
           </div>
         ) : (
           <div className="text-slate-400">
@@ -251,7 +335,7 @@ export default function CityMap({
         )}
 
         {/* Quiet Legend */}
-        <div className="flex items-center gap-3 text-[11px] text-slate-400 select-none">
+        <div className="flex items-center gap-3 text-[11px] text-slate-400 select-none flex-wrap">
           <span className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded bg-sky-600" />
             <span>Restaurant A</span>
@@ -260,6 +344,18 @@ export default function CityMap({
             <span className="w-2.5 h-2.5 rounded bg-rose-600" />
             <span>Restaurant B</span>
           </span>
+          {selectedEquilibrium && (
+            <>
+              <span className="flex items-center gap-1 text-sky-300">
+                <span className="w-2.5 h-2.5 rounded border border-dashed border-sky-400 bg-sky-950/50" />
+                <span>A* Eq.</span>
+              </span>
+              <span className="flex items-center gap-1 text-rose-300">
+                <span className="w-2.5 h-2.5 rounded border border-dashed border-rose-400 bg-rose-950/50" />
+                <span>B* Eq.</span>
+              </span>
+            </>
+          )}
           <span className="flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-sky-400/60" />
             <span>A market</span>

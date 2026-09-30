@@ -468,17 +468,23 @@ export function findPureNashEquilibria({
   const matrixResult = solvePureNashFromPayoffs(payoffsA, payoffsB, { M, N });
 
   // Map indices back to full strategy objects and outcomes
-  const equilibria = matrixResult.equilibria.map((eq) => {
+  const equilibria = matrixResult.equilibria.map((eq, index) => {
     const idx = eq.indexA * N + eq.indexB;
+    const dA = demandsA[idx];
+    const dB = demandsB[idx];
+    const totalD = dA + dB;
     return {
+      id: index + 1,
       strategyA: spaceA[eq.indexA],
       strategyB: spaceB[eq.indexB],
       indexA: eq.indexA,
       indexB: eq.indexB,
       payoffA: eq.payoffA,
       payoffB: eq.payoffB,
-      demandA: demandsA[idx],
-      demandB: demandsB[idx],
+      demandA: dA,
+      demandB: dB,
+      marketShareA: totalD > 0 ? dA / totalD : 0.5,
+      marketShareB: totalD > 0 ? dB / totalD : 0.5,
     };
   });
 

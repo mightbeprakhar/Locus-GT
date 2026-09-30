@@ -13,9 +13,9 @@ import PayoffPanel from './PayoffPanel.jsx';
 import EquilibriumPanel from './EquilibriumPanel.jsx';
 import { createDefaultCity } from '../game/city.js';
 import { evaluateProfile } from '../game/payoff.js';
-import { checkPureNashEquilibrium } from '../game/equilibrium.js';
+import { checkPureNashEquilibrium, findPureNashEquilibria } from '../game/equilibrium.js';
 
-describe('Phase 3.5 — LOCUS Refined UI Components', () => {
+describe('LOCUS UI Components', () => {
   const city = createDefaultCity();
   const strategyA = { location: { x: 2, y: 5 }, price: 250 };
   const strategyB = { location: { x: 7, y: 5 }, price: 250 };
@@ -90,11 +90,10 @@ describe('Phase 3.5 — LOCUS Refined UI Components', () => {
     expect(html).toContain('Demand');
     expect(html).toContain('Profit');
     expect(html).toContain('Margin');
-    // Margin for price 250 is 250 - 100 = 150 -> ₹150
     expect(html).toContain('₹150');
   });
 
-  it('renders EquilibriumPanel with real-time Nash equilibrium diagnostic', () => {
+  it('renders EquilibriumPanel with real-time Nash equilibrium diagnostic and search button', () => {
     const html = renderToString(
       <EquilibriumPanel
         equilibriumStatus={equilibriumStatus}
@@ -107,6 +106,7 @@ describe('Phase 3.5 — LOCUS Refined UI Components', () => {
     expect(html).toContain('Equilibrium');
     expect(html).toContain('Unilateral deviation analysis');
     expect(html).toContain('Search for pure Nash equilibria');
+    expect(html).toContain('Full-game Nash search');
   });
 
   it('renders the complete App shell with header, branding, workspace, and telemetry', () => {
@@ -117,5 +117,128 @@ describe('Phase 3.5 — LOCUS Refined UI Components', () => {
     expect(html).toContain('10 × 10 grid');
     expect(html).toContain('customers');
     expect(html).toContain('Model:');
+  });
+
+  // PHASE 4A — Nash Equilibrium Explorer Component Tests
+  describe('Phase 4A — Nash Equilibrium Explorer Component Integration', () => {
+    const mockEquilibrium = {
+      id: 7,
+      strategyA: { location: { x: 4, y: 5 }, price: 250 },
+      strategyB: { location: { x: 5, y: 5 }, price: 250 },
+      payoffA: 875000,
+      payoffB: 875000,
+      demandA: 5000,
+      demandB: 5000,
+      marketShareA: 0.5,
+      marketShareB: 0.5,
+    };
+
+    it('renders CityMap with preview markers A* and B* when an equilibrium is selected', () => {
+      const html = renderToString(
+        <CityMap
+          city={city}
+          strategyA={strategyA}
+          strategyB={strategyB}
+          selectedRestaurant="A"
+          onSelectLocation={() => {}}
+          evaluation={evaluation}
+          selectedEquilibrium={mockEquilibrium}
+        />
+      );
+
+      // Current positions are A(2,5) and B(7,5)
+      expect(html).toContain('>A<');
+      expect(html).toContain('>B<');
+
+      // Candidate preview markers for Equilibrium #7 at (4,5) and (5,5)
+      expect(html).toContain('>A*<');
+      expect(html).toContain('>B*<');
+
+      // Inspector bar and legend reflect preview state
+      expect(html).toContain('Inspecting Eq #7:');
+      expect(html).toContain('A*(4, 5)');
+      expect(html).toContain('B*(5, 5)');
+      expect(html).toContain('A* Eq.');
+      expect(html).toContain('B* Eq.');
+    });
+
+    it('renders EquilibriumPanel with detailed inspection card when an equilibrium is selected', () => {
+      const html = renderToString(
+        <EquilibriumPanel
+          equilibriumStatus={equilibriumStatus}
+          city={city}
+          strategyA={strategyA}
+          strategyB={strategyB}
+          selectedEquilibrium={mockEquilibrium}
+          onSelectEquilibrium={() => {}}
+          onLoadEquilibrium={() => {}}
+        />
+      );
+
+      // Selected equilibrium title and status
+      expect(html).toContain('Selected Equilibrium #7');
+      expect(html).toContain('Pure Nash');
+
+      // Explicit comparison: Current Simulation vs Selected Equilibrium
+      expect(html).toContain('Current simulation:');
+      expect(html).toContain('Selected equilibrium #7:');
+
+      // Why is this a Nash equilibrium?
+      expect(html).toContain('Why is this a Nash equilibrium?');
+      expect(html).toContain('Neither restaurant can increase its profit by unilaterally changing its location or price');
+
+      // Load action
+      expect(html).toContain('Load into simulation');
+      expect(html).toContain('Clear inspection');
+    });
+
+    it('renders CityMap cleanly when the selected equilibrium matches current positions', () => {
+      const matchingEq = {
+        id: 1,
+        strategyA: { location: { x: 2, y: 5 }, price: 250 },
+        strategyB: { location: { x: 7, y: 5 }, price: 250 },
+        payoffA: 700000,
+        payoffB: 700000,
+      };
+
+      const html = renderToString(
+        <CityMap
+          city={city}
+          strategyA={matchingEq.strategyA}
+          strategyB={matchingEq.strategyB}
+          selectedRestaurant="A"
+          onSelectLocation={() => {}}
+          evaluation={evaluation}
+          selectedEquilibrium={matchingEq}
+        />
+      );
+
+      // Markers A and B should be rendered with matching title
+      expect(html).toContain('>A<');
+      expect(html).toContain('>B<');
+      expect(html).toContain('at equilibrium location');
+    });
+
+    it('findPureNashEquilibria provides all data needed by the EquilibriumPanel explorer', () => {
+      // Test on small controlled space to verify UI data contract
+      const smallSpace = [
+        { location: { x: 0, y: 0 }, price: 150 },
+        { location: { x: 0, y: 0 }, price: 250 },
+      ];
+      const result = findPureNashEquilibria({
+        city: [{ x: 0, y: 0, population: 100 }],
+        strategySpace: smallSpace,
+      });
+
+      expect(result.count).toBeGreaterThan(0);
+      const eq = result.equilibria[0];
+      expect(eq.id).toBe(1);
+      expect(eq.strategyA.location).toBeDefined();
+      expect(eq.strategyB.location).toBeDefined();
+      expect(eq.payoffA).toBeDefined();
+      expect(eq.payoffB).toBeDefined();
+      expect(eq.marketShareA).toBeDefined();
+      expect(eq.marketShareB).toBeDefined();
+    });
   });
 });

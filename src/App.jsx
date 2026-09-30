@@ -35,6 +35,9 @@ export default function App() {
   // Active controlled restaurant for relocation and pricing
   const [selectedRestaurant, setSelectedRestaurant] = useState('A');
 
+  // Currently inspected Nash equilibrium profile (Phase 4A Explorer)
+  const [selectedEquilibrium, setSelectedEquilibrium] = useState(null);
+
   // Profile evaluation (allocations included for market visualization)
   const evaluation = useMemo(() => {
     return evaluateProfile({
@@ -87,11 +90,19 @@ export default function App() {
     }
   }, []);
 
+  // Load a discovered Nash equilibrium profile directly into simulation
+  const handleLoadEquilibrium = useCallback((equilibrium) => {
+    if (!equilibrium) return;
+    setStrategyA(equilibrium.strategyA);
+    setStrategyB(equilibrium.strategyB);
+  }, []);
+
   // Reset simulation to baseline initial configuration
   const handleReset = useCallback(() => {
     setStrategyA(INITIAL_STRATEGY_A);
     setStrategyB(INITIAL_STRATEGY_B);
     setSelectedRestaurant('A');
+    setSelectedEquilibrium(null);
   }, []);
 
   return (
@@ -146,6 +157,7 @@ export default function App() {
             selectedRestaurant={selectedRestaurant}
             onSelectLocation={handleSelectLocation}
             evaluation={evaluation}
+            selectedEquilibrium={selectedEquilibrium}
           />
         </div>
 
@@ -171,6 +183,9 @@ export default function App() {
             city={city}
             strategyA={strategyA}
             strategyB={strategyB}
+            selectedEquilibrium={selectedEquilibrium}
+            onSelectEquilibrium={setSelectedEquilibrium}
+            onLoadEquilibrium={handleLoadEquilibrium}
           />
         </div>
       </main>

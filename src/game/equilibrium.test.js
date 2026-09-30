@@ -11,7 +11,7 @@ import {
   solvePureNashFromPayoffs,
   findPureNashEquilibria,
 } from './index.js';
-import { createUniformCity } from './city.js';
+import { createUniformCity, createDefaultCity } from './city.js';
 
 describe('LOCUS Game Theory Engine — Phase 2: Best Responses & Nash Equilibrium', () => {
   // TEST A — Best Response
@@ -344,6 +344,101 @@ describe('LOCUS Game Theory Engine — Phase 2: Best Responses & Nash Equilibriu
       expect(res.profitA).toBe(6000);
       // profitB = (200 - 120) * 50 = 4000
       expect(res.profitB).toBe(4000);
+    });
+  });
+
+  // PHASE 4A — Nash Equilibrium Explorer Engine Requirements
+  describe('Phase 4A — Nash Equilibrium Explorer Engine Tests', () => {
+    it('exposes full equilibrium profiles with canonical strategy representations, payoffs, and market shares', () => {
+      const city = [{ x: 5, y: 5, population: 100 }];
+      const space = [
+        { location: { x: 5, y: 5 }, price: 150 },
+        { location: { x: 5, y: 5 }, price: 250 },
+      ];
+      const result = findPureNashEquilibria({ city, strategySpace: space });
+      expect(result.equilibria.length).toBeGreaterThan(0);
+
+      for (const eq of result.equilibria) {
+        expect(eq).toHaveProperty('id');
+        expect(typeof eq.id).toBe('number');
+        // Canonical structure { location: { x, y }, price } without top-level x, y
+        expect(eq.strategyA).toHaveProperty('location');
+        expect(eq.strategyA.location).toHaveProperty('x');
+        expect(eq.strategyA.location).toHaveProperty('y');
+        expect(eq.strategyA).toHaveProperty('price');
+        expect(eq.strategyA).not.toHaveProperty('x');
+        expect(eq.strategyA).not.toHaveProperty('y');
+
+        expect(eq.strategyB).toHaveProperty('location');
+        expect(eq.strategyB.location).toHaveProperty('x');
+        expect(eq.strategyB.location).toHaveProperty('y');
+        expect(eq.strategyB).toHaveProperty('price');
+        expect(eq.strategyB).not.toHaveProperty('x');
+        expect(eq.strategyB).not.toHaveProperty('y');
+
+        expect(typeof eq.payoffA).toBe('number');
+        expect(typeof eq.payoffB).toBe('number');
+        expect(typeof eq.demandA).toBe('number');
+        expect(typeof eq.demandB).toBe('number');
+        expect(typeof eq.marketShareA).toBe('number');
+        expect(typeof eq.marketShareB).toBe('number');
+      }
+    });
+
+    it('finds exactly 32 unique pure-strategy Nash equilibria on the default 10x10 city', () => {
+      const city = createDefaultCity();
+      const result = findPureNashEquilibria({ city });
+
+      expect(result.count).toBe(32);
+      expect(result.equilibria).toHaveLength(32);
+
+      // Verify uniqueness: solver does not return duplicate strategy profiles
+      const uniqueKeys = new Set(
+        result.equilibria.map(
+          (eq) =>
+            `${eq.strategyA.location.x},${eq.strategyA.location.y},${eq.strategyA.price}|${eq.strategyB.location.x},${eq.strategyB.location.y},${eq.strategyB.price}`
+        )
+      );
+      expect(uniqueKeys.size).toBe(32);
+
+      // Verify every returned profile satisfies checkPureNashEquilibrium
+      for (const eq of result.equilibria) {
+        const check = checkPureNashEquilibrium({
+          city,
+          strategyA: eq.strategyA,
+          strategyB: eq.strategyB,
+        });
+        expect(check.isNash).toBe(true);
+        expect(check.playerA.hasProfitableDeviation).toBe(false);
+        expect(check.playerB.hasProfitableDeviation).toBe(false);
+      }
+    });
+
+    it('preserves asymmetric player roles without dropping symmetric arrangement duplicates', () => {
+      const city = createDefaultCity();
+      const result = findPureNashEquilibria({ city });
+
+      // If (s1, s2) is an equilibrium where s1 != s2, in a symmetric game (s2, s1) must also be an equilibrium
+      const asymmetricProfiles = result.equilibria.filter(
+        (eq) =>
+          eq.strategyA.location.x !== eq.strategyB.location.x ||
+          eq.strategyA.location.y !== eq.strategyB.location.y ||
+          eq.strategyA.price !== eq.strategyB.price
+      );
+
+      // Verify symmetric counterpart exists for every asymmetric profile
+      for (const eq of asymmetricProfiles) {
+        const counterpartExists = result.equilibria.some(
+          (other) =>
+            other.strategyA.location.x === eq.strategyB.location.x &&
+            other.strategyA.location.y === eq.strategyB.location.y &&
+            other.strategyA.price === eq.strategyB.price &&
+            other.strategyB.location.x === eq.strategyA.location.x &&
+            other.strategyB.location.y === eq.strategyA.location.y &&
+            other.strategyB.price === eq.strategyA.price
+        );
+        expect(counterpartExists).toBe(true);
+      }
     });
   });
 });
