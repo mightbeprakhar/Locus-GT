@@ -48,12 +48,12 @@ export default function PayoffPanel({ evaluation, strategyA, strategyB }) {
 
       {/* Firm Outcomes Comparison */}
       <div className="grid grid-cols-2 gap-4">
-        {/* Restaurant A */}
+        {/* Restaurant 1 */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/60">
             <span className="text-xs font-semibold text-sky-400 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-sky-400" />
-              Restaurant A
+              Restaurant 1 <span className="text-[10px] text-slate-500 font-normal">(Firm A)</span>
             </span>
             <span className="text-xs font-mono text-slate-400">{`₹${strategyA.price}`}</span>
           </div>
@@ -93,12 +93,12 @@ export default function PayoffPanel({ evaluation, strategyA, strategyB }) {
           </div>
         </div>
 
-        {/* Restaurant B */}
+        {/* Restaurant 2 */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/60">
             <span className="text-xs font-semibold text-rose-400 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-rose-400" />
-              Restaurant B
+              Restaurant 2 <span className="text-[10px] text-slate-500 font-normal">(Firm B)</span>
             </span>
             <span className="text-xs font-mono text-slate-400">{`₹${strategyB.price}`}</span>
           </div>

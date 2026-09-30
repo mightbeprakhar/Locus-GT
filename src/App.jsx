@@ -8,10 +8,11 @@ import { useState, useMemo, useCallback } from 'react';
 import CityMap from './components/CityMap.jsx';
 import GameControls from './components/GameControls.jsx';
 import PayoffPanel from './components/PayoffPanel.jsx';
+import BestResponsePanel from './components/BestResponsePanel.jsx';
 import EquilibriumPanel from './components/EquilibriumPanel.jsx';
 import { createDefaultCity } from './game/city.js';
 import { evaluateProfile } from './game/payoff.js';
-import { checkPureNashEquilibrium } from './game/equilibrium.js';
+import { checkPureNashEquilibrium, computeBestResponseAnalysis } from './game/equilibrium.js';
 
 // Baseline strategy profile
 const INITIAL_STRATEGY_A = Object.freeze({
@@ -38,6 +39,9 @@ export default function App() {
   // Currently inspected Nash equilibrium profile (Phase 4A Explorer)
   const [selectedEquilibrium, setSelectedEquilibrium] = useState(null);
 
+  // Currently inspected Best Response target (Phase 4B Analysis)
+  const [selectedBestResponse, setSelectedBestResponse] = useState(null);
+
   // Profile evaluation (allocations included for market visualization)
   const evaluation = useMemo(() => {
     return evaluateProfile({
@@ -54,6 +58,15 @@ export default function App() {
       strategyA,
       strategyB,
       city,
+    });
+  }, [city, strategyA, strategyB]);
+
+  // Real-time Best Response analysis for both restaurants
+  const bestResponseAnalysis = useMemo(() => {
+    return computeBestResponseAnalysis({
+      city,
+      strategyA,
+      strategyB,
     });
   }, [city, strategyA, strategyB]);
 
@@ -90,11 +103,23 @@ export default function App() {
     }
   }, []);
 
+  // Apply a recommended best response to a specific restaurant
+  const handleApplyBestResponse = useCallback((player, strategy) => {
+    if (!strategy) return;
+    if (player === 'A') {
+      setStrategyA(strategy);
+    } else {
+      setStrategyB(strategy);
+    }
+    setSelectedBestResponse(null);
+  }, []);
+
   // Load a discovered Nash equilibrium profile directly into simulation
   const handleLoadEquilibrium = useCallback((equilibrium) => {
     if (!equilibrium) return;
     setStrategyA(equilibrium.strategyA);
     setStrategyB(equilibrium.strategyB);
+    setSelectedBestResponse(null);
   }, []);
 
   // Reset simulation to baseline initial configuration
@@ -103,6 +128,7 @@ export default function App() {
     setStrategyB(INITIAL_STRATEGY_B);
     setSelectedRestaurant('A');
     setSelectedEquilibrium(null);
+    setSelectedBestResponse(null);
   }, []);
 
   return (
@@ -158,6 +184,7 @@ export default function App() {
             onSelectLocation={handleSelectLocation}
             evaluation={evaluation}
             selectedEquilibrium={selectedEquilibrium}
+            selectedBestResponse={selectedBestResponse}
           />
         </div>
 
@@ -178,6 +205,15 @@ export default function App() {
             strategyB={strategyB}
           />
 
+          <BestResponsePanel
+            analysis={bestResponseAnalysis}
+            strategyA={strategyA}
+            strategyB={strategyB}
+            selectedBestResponse={selectedBestResponse}
+            onSelectBestResponse={setSelectedBestResponse}
+            onApplyBestResponse={handleApplyBestResponse}
+          />
+
           <EquilibriumPanel
             equilibriumStatus={equilibriumStatus}
             city={city}
@@ -196,7 +232,7 @@ export default function App() {
           Model: Euclidean travel distance · discrete prices · full market coverage
         </div>
         <div className="font-mono text-[11px] text-slate-400">
-          A({strategyA.location.x}, {strategyA.location.y}) at ₹{strategyA.price} vs B({strategyB.location.x}, {strategyB.location.y}) at ₹{strategyB.price}
+          R1({strategyA.location.x}, {strategyA.location.y}) at ₹{strategyA.price} vs R2({strategyB.location.x}, {strategyB.location.y}) at ₹{strategyB.price}
         </div>
       </footer>
     </div>

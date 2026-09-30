@@ -70,6 +70,7 @@ export function findBestResponses({
   const isPlayerA = player.toUpperCase() === 'A';
   let bestPayoff = -Infinity;
   let bestResponses = [];
+  let bestResponseDetails = [];
   const evaluatedStrategies = [];
 
   for (let i = 0; i < strategySpace.length; i++) {
@@ -94,20 +95,23 @@ export function findBestResponses({
     const demand = isPlayerA ? evaluation.demandA : evaluation.demandB;
     const marketShare = isPlayerA ? evaluation.marketShareA : evaluation.marketShareB;
 
-    evaluatedStrategies.push({
+    const evaluatedItem = {
       strategy: candidate,
       payoff,
       demand,
       marketShare,
-    });
+    };
+    evaluatedStrategies.push(evaluatedItem);
 
     // Check if new strictly better payoff found beyond float tolerance
     if (payoff > bestPayoff + FLOAT_EPSILON) {
       bestPayoff = payoff;
       bestResponses = [candidate];
+      bestResponseDetails = [evaluatedItem];
     } else if (Math.abs(payoff - bestPayoff) <= FLOAT_EPSILON) {
       // Tied payoff within tolerance
       bestResponses.push(candidate);
+      bestResponseDetails.push(evaluatedItem);
     }
   }
 
@@ -116,6 +120,7 @@ export function findBestResponses({
     opponentStrategy,
     bestPayoff,
     bestResponses,
+    bestResponseDetails,
     evaluatedStrategies,
   };
 }
@@ -245,12 +250,178 @@ export function checkPureNashEquilibrium({
       bestPayoff: brA.bestPayoff,
       hasProfitableDeviation: hasProfitableDeviationA,
       bestResponses: brA.bestResponses,
+      bestResponseDetails: brA.bestResponseDetails,
     },
     playerB: {
       currentPayoff: currentPayoffB,
       bestPayoff: brB.bestPayoff,
       hasProfitableDeviation: hasProfitableDeviationB,
       bestResponses: brB.bestResponses,
+      bestResponseDetails: brB.bestResponseDetails,
+    },
+  };
+}
+
+/**
+ * Computes comprehensive unilateral best-response analysis for both firms in a strategy profile.
+ *
+ * For each firm:
+ * - Current strategy and economic outcome (location, price, demand, marketShare, profit)
+ * - Optimal best-response strategy(ies) and expected outcomes
+ * - Profitable deviation state (boolean)
+ * - Maximum profit improvement relative to current strategy
+ * - Tied best response details if multiple strategies achieve the optimal payoff
+ *
+ * @param {Object} params
+ * @param {Array<Object>|{cells: Array<Object>}} params.city - City customer grid
+ * @param {{location: {x: number, y: number}, price: number}} params.strategyA - Player A strategy
+ * @param {{location: {x: number, y: number}, price: number}} params.strategyB - Player B strategy
+ * @param {Array<{location: {x: number, y: number}, price: number}>} [params.strategySpace] - Shared strategy space
+ * @param {Array<{location: {x: number, y: number}, price: number}>} [params.strategySpaceA] - Strategy space for A
+ * @param {Array<{location: {x: number, y: number}, price: number}>} [params.strategySpaceB] - Strategy space for B
+ * @param {{V?: number, alpha?: number}} [params.config=DEFAULT_PARAMS] - Economic parameters
+ * @param {number} [params.variableCost=DEFAULT_VARIABLE_COST] - Marginal cost
+ * @param {number} [params.fixedCost=DEFAULT_FIXED_COST] - Fixed cost
+ * @param {number} [params.variableCostA] - Specific marginal cost for A
+ * @param {number} [params.variableCostB] - Specific marginal cost for B
+ * @param {number} [params.fixedCostA] - Specific fixed cost for A
+ * @param {number} [params.fixedCostB] - Specific fixed cost for B
+ * @returns {{
+ *   isNash: boolean,
+ *   currentEvaluation: Object,
+ *   restaurant1: {
+ *     player: 'A',
+ *     current: { location: {x: number, y: number}, price: number, demand: number, marketShare: number, profit: number },
+ *     bestResponses: Array<{location: {x: number, y: number}, price: number}>,
+ *     bestResponseDetails: Array<{strategy: Object, payoff: number, demand: number, marketShare: number}>,
+ *     bestPayoff: number,
+ *     hasProfitableDeviation: boolean,
+ *     profitImprovement: number,
+ *     isBestResponse: boolean,
+ *     tiedCount: number
+ *   },
+ *   restaurant2: {
+ *     player: 'B',
+ *     current: { location: {x: number, y: number}, price: number, demand: number, marketShare: number, profit: number },
+ *     bestResponses: Array<{location: {x: number, y: number}, price: number}>,
+ *     bestResponseDetails: Array<{strategy: Object, payoff: number, demand: number, marketShare: number}>,
+ *     bestPayoff: number,
+ *     hasProfitableDeviation: boolean,
+ *     profitImprovement: number,
+ *     isBestResponse: boolean,
+ *     tiedCount: number
+ *   }
+ * }}
+ */
+export function computeBestResponseAnalysis({
+  city,
+  strategyA,
+  strategyB,
+  strategySpace,
+  strategySpaceA,
+  strategySpaceB,
+  config = DEFAULT_PARAMS,
+  variableCost = DEFAULT_VARIABLE_COST,
+  fixedCost = DEFAULT_FIXED_COST,
+  variableCostA,
+  variableCostB,
+  fixedCostA,
+  fixedCostB,
+}) {
+  const spaceA = strategySpaceA ?? strategySpace ?? generateStrategySpace();
+  const spaceB = strategySpaceB ?? strategySpace ?? spaceA;
+
+  // 1. Evaluate current profile
+  const currentEvaluation = evaluateProfile({
+    city,
+    strategyA,
+    strategyB,
+    config,
+    variableCost,
+    fixedCost,
+    variableCostA,
+    variableCostB,
+    fixedCostA,
+    fixedCostB,
+  });
+
+  // 2. Best responses for Player A (Restaurant 1) against strategyB
+  const brA = findBestResponses({
+    player: 'A',
+    opponentStrategy: strategyB,
+    strategySpace: spaceA,
+    city,
+    config,
+    variableCost,
+    fixedCost,
+    variableCostA,
+    variableCostB,
+    fixedCostA,
+    fixedCostB,
+  });
+
+  // 3. Best responses for Player B (Restaurant 2) against strategyA
+  const brB = findBestResponses({
+    player: 'B',
+    opponentStrategy: strategyA,
+    strategySpace: spaceB,
+    city,
+    config,
+    variableCost,
+    fixedCost,
+    variableCostA,
+    variableCostB,
+    fixedCostA,
+    fixedCostB,
+  });
+
+  const profitA = currentEvaluation.profitA;
+  const profitB = currentEvaluation.profitB;
+
+  const hasProfitableDeviationA = brA.bestPayoff > profitA + FLOAT_EPSILON;
+  const hasProfitableDeviationB = brB.bestPayoff > profitB + FLOAT_EPSILON;
+
+  const profitImprovementA = hasProfitableDeviationA ? brA.bestPayoff - profitA : 0;
+  const profitImprovementB = hasProfitableDeviationB ? brB.bestPayoff - profitB : 0;
+
+  const isNash = !hasProfitableDeviationA && !hasProfitableDeviationB;
+
+  return {
+    isNash,
+    currentEvaluation,
+    restaurant1: {
+      player: 'A',
+      current: {
+        location: strategyA.location,
+        price: strategyA.price,
+        demand: currentEvaluation.demandA,
+        marketShare: currentEvaluation.marketShareA,
+        profit: profitA,
+      },
+      bestResponses: brA.bestResponses,
+      bestResponseDetails: brA.bestResponseDetails,
+      bestPayoff: brA.bestPayoff,
+      hasProfitableDeviation: hasProfitableDeviationA,
+      profitImprovement: profitImprovementA,
+      isBestResponse: !hasProfitableDeviationA,
+      tiedCount: brA.bestResponses.length,
+    },
+    restaurant2: {
+      player: 'B',
+      current: {
+        location: strategyB.location,
+        price: strategyB.price,
+        demand: currentEvaluation.demandB,
+        marketShare: currentEvaluation.marketShareB,
+        profit: profitB,
+      },
+      bestResponses: brB.bestResponses,
+      bestResponseDetails: brB.bestResponseDetails,
+      bestPayoff: brB.bestPayoff,
+      hasProfitableDeviation: hasProfitableDeviationB,
+      profitImprovement: profitImprovementB,
+      isBestResponse: !hasProfitableDeviationB,
+      tiedCount: brB.bestResponses.length,
     },
   };
 }

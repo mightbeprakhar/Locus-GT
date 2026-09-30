@@ -1,7 +1,7 @@
 /**
  * @file CityMap.jsx
  * @description Spatial simulation view displaying customer zones, population density,
- * market capture, restaurant locations, and selected equilibrium previews.
+ * market capture, restaurant locations, best-response targets, and selected equilibrium previews.
  */
 
 import { useState, useMemo, Fragment } from 'react';
@@ -16,7 +16,8 @@ import { distance } from '../game/utility.js';
  * @param {'A'|'B'} props.selectedRestaurant
  * @param {(location: {x: number, y: number}) => void} props.onSelectLocation
  * @param {Object} props.evaluation
- * @param {Object|null} [props.selectedEquilibrium] - Optional equilibrium to preview on the map
+ * @param {Object|null} [props.selectedEquilibrium] - Optional equilibrium to preview on the map (Phase 4A)
+ * @param {Object|null} [props.selectedBestResponse] - Optional best-response target to preview on the map (Phase 4B)
  */
 export default function CityMap({
   city,
@@ -26,6 +27,7 @@ export default function CityMap({
   onSelectLocation,
   evaluation,
   selectedEquilibrium = null,
+  selectedBestResponse = null,
 }) {
   const [hoveredCell, setHoveredCell] = useState(null);
 
@@ -59,10 +61,15 @@ export default function CityMap({
   const locA = strategyA.location;
   const locB = strategyB.location;
 
+  // Phase 4A Equilibrium Targets
   const eqLocA = selectedEquilibrium?.strategyA?.location;
   const eqLocB = selectedEquilibrium?.strategyB?.location;
 
-  const activeName = selectedRestaurant === 'A' ? 'Restaurant A' : 'Restaurant B';
+  // Phase 4B Best Response Target
+  const brPlayer = selectedBestResponse?.player;
+  const brLoc = selectedBestResponse?.strategy?.location;
+
+  const activeName = selectedRestaurant === 'A' ? 'Restaurant 1' : 'Restaurant 2';
   const activeColor = selectedRestaurant === 'A' ? 'text-sky-400' : 'text-rose-400';
 
   return (
@@ -131,9 +138,15 @@ export default function CityMap({
                 const isB = locB.x === x && locB.y === y;
                 const isBoth = isA && isB;
 
+                // Phase 4A Equilibrium Previews
                 const isEqA = eqLocA && eqLocA.x === x && eqLocA.y === y;
                 const isEqB = eqLocB && eqLocB.x === x && eqLocB.y === y;
                 const isEqBoth = isEqA && isEqB;
+
+                // Phase 4B Best Response Target Previews
+                const isBrTarget = brLoc && brLoc.x === x && brLoc.y === y;
+                const isBrA = isBrTarget && brPlayer === 'A';
+                const isBrB = isBrTarget && brPlayer === 'B';
 
                 // Normalized density ratio (0 to 1)
                 const popRatio =
@@ -141,7 +154,7 @@ export default function CityMap({
 
                 // Market capture dot styling
                 let marketDot = null;
-                if (alloc && !isA && !isB && !isBoth && !isEqA && !isEqB) {
+                if (alloc && !isA && !isB && !isBoth && !isEqA && !isEqB && !isBrA && !isBrB) {
                   if (alloc.choice === 'A') {
                     marketDot = 'bg-sky-400/60';
                   } else if (alloc.choice === 'B') {
@@ -163,14 +176,16 @@ export default function CityMap({
                     onFocus={() => setHoveredCell(cell)}
                     onBlur={() => setHoveredCell(null)}
                     aria-label={`Zone (${x}, ${y}), population ${cell.population}${
-                      isA ? ', Restaurant A' : ''
-                    }${isB ? ', Restaurant B' : ''}${
+                      isA ? ', Restaurant 1 (Firm A)' : ''
+                    }${isB ? ', Restaurant 2 (Firm B)' : ''}${
+                      isBrA ? ', Restaurant 1 Best Response Target' : ''
+                    }${isBrB ? ', Restaurant 2 Best Response Target' : ''}${
                       isEqA ? ', Equilibrium A target' : ''
                     }${isEqB ? ', Equilibrium B target' : ''}`}
                     className={`relative w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded border transition-colors flex items-center justify-center cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 ${
                       isCellHovered
                         ? 'border-slate-500 z-10'
-                        : isEqA || isEqB
+                        : isEqA || isEqB || isBrA || isBrB
                         ? 'border-slate-700'
                         : 'border-slate-800/60 hover:border-slate-700'
                     }`}
@@ -178,26 +193,26 @@ export default function CityMap({
                       backgroundColor: `rgba(30, 41, 59, ${0.15 + popRatio * 0.45})`,
                     }}
                   >
-                    {/* Active Restaurant Markers & Equilibrium Previews */}
+                    {/* Active Restaurant Markers, Best-Response Previews & Equilibrium Previews */}
                     {isBoth ? (
                       <div className="flex items-center gap-0.5">
                         <motion.div
                           layoutId="marker-both-A"
                           className={`w-4 h-4 sm:w-5 sm:h-5 rounded bg-sky-600 text-white font-bold text-[10px] flex items-center justify-center ${
                             selectedRestaurant === 'A' ? 'ring-1 ring-sky-300' : ''
-                          } ${isEqA ? 'ring-2 ring-emerald-400/90' : ''}`}
-                          title={`Restaurant A${isEqA ? ' (at equilibrium location)' : ''}`}
+                          } ${isBrA ? 'ring-2 ring-emerald-400' : ''} ${isEqA ? 'ring-2 ring-emerald-400/90' : ''}`}
+                          title={`Restaurant 1${isBrA ? ' (at best-response target)' : ''}${isEqA ? ' (at equilibrium location)' : ''}`}
                         >
-                          A
+                          1
                         </motion.div>
                         <motion.div
                           layoutId="marker-both-B"
                           className={`w-4 h-4 sm:w-5 sm:h-5 rounded bg-rose-600 text-white font-bold text-[10px] flex items-center justify-center ${
                             selectedRestaurant === 'B' ? 'ring-1 ring-rose-300' : ''
-                          } ${isEqB ? 'ring-2 ring-emerald-400/90' : ''}`}
-                          title={`Restaurant B${isEqB ? ' (at equilibrium location)' : ''}`}
+                          } ${isBrB ? 'ring-2 ring-emerald-400' : ''} ${isEqB ? 'ring-2 ring-emerald-400/90' : ''}`}
+                          title={`Restaurant 2${isBrB ? ' (at best-response target)' : ''}${isEqB ? ' (at equilibrium location)' : ''}`}
                         >
-                          B
+                          2
                         </motion.div>
                       </div>
                     ) : isA ? (
@@ -206,12 +221,20 @@ export default function CityMap({
                           layoutId="marker-A"
                           className={`w-6 h-6 sm:w-7 sm:h-7 rounded bg-sky-600 text-white font-bold text-xs flex items-center justify-center ${
                             selectedRestaurant === 'A' ? 'ring-2 ring-sky-300' : ''
-                          } ${isEqA ? 'ring-2 ring-emerald-400/90' : ''}`}
-                          title={`Restaurant A${isEqA ? ' (at equilibrium location)' : ''}`}
+                          } ${isBrA ? 'ring-2 ring-emerald-400' : ''} ${isEqA ? 'ring-2 ring-emerald-400/90' : ''}`}
+                          title={`Restaurant 1${isBrA ? ' (at best-response target)' : ''}${isEqA ? ' (at equilibrium location)' : ''}`}
                         >
-                          A
+                          1
                         </motion.div>
-                        {isEqB && (
+                        {isBrB && (
+                          <div
+                            className="w-4 h-4 sm:w-5 sm:h-5 rounded border border-dashed border-rose-400 bg-rose-950/60 text-rose-300 font-bold text-[9px] flex items-center justify-center"
+                            title={`Restaurant 2 Best Response Target (${x}, ${y})`}
+                          >
+                            BR 2
+                          </div>
+                        )}
+                        {isEqB && !isBrB && (
                           <div
                             className="w-4 h-4 sm:w-5 sm:h-5 rounded border border-dashed border-rose-400 bg-rose-950/60 text-rose-300 font-bold text-[10px] flex items-center justify-center"
                             title={`Equilibrium #${selectedEquilibrium?.id}: Restaurant B target`}
@@ -226,12 +249,20 @@ export default function CityMap({
                           layoutId="marker-B"
                           className={`w-6 h-6 sm:w-7 sm:h-7 rounded bg-rose-600 text-white font-bold text-xs flex items-center justify-center ${
                             selectedRestaurant === 'B' ? 'ring-2 ring-rose-300' : ''
-                          } ${isEqB ? 'ring-2 ring-emerald-400/90' : ''}`}
-                          title={`Restaurant B${isEqB ? ' (at equilibrium location)' : ''}`}
+                          } ${isBrB ? 'ring-2 ring-emerald-400' : ''} ${isEqB ? 'ring-2 ring-emerald-400/90' : ''}`}
+                          title={`Restaurant 2${isBrB ? ' (at best-response target)' : ''}${isEqB ? ' (at equilibrium location)' : ''}`}
                         >
-                          B
+                          2
                         </motion.div>
-                        {isEqA && (
+                        {isBrA && (
+                          <div
+                            className="w-4 h-4 sm:w-5 sm:h-5 rounded border border-dashed border-sky-400 bg-sky-950/60 text-sky-300 font-bold text-[9px] flex items-center justify-center"
+                            title={`Restaurant 1 Best Response Target (${x}, ${y})`}
+                          >
+                            BR 1
+                          </div>
+                        )}
+                        {isEqA && !isBrA && (
                           <div
                             className="w-4 h-4 sm:w-5 sm:h-5 rounded border border-dashed border-sky-400 bg-sky-950/60 text-sky-300 font-bold text-[10px] flex items-center justify-center"
                             title={`Equilibrium #${selectedEquilibrium?.id}: Restaurant A target`}
@@ -239,6 +270,20 @@ export default function CityMap({
                             A*
                           </div>
                         )}
+                      </div>
+                    ) : isBrA ? (
+                      <div
+                        className="w-6 h-6 sm:w-7 sm:h-7 rounded border-2 border-dashed border-sky-400 bg-sky-950/60 text-sky-300 font-bold text-[10px] sm:text-xs flex items-center justify-center shadow-sm select-none"
+                        title={`Restaurant 1 Best Response target at (${x}, ${y}) @ ₹${selectedBestResponse?.strategy?.price}`}
+                      >
+                        BR 1
+                      </div>
+                    ) : isBrB ? (
+                      <div
+                        className="w-6 h-6 sm:w-7 sm:h-7 rounded border-2 border-dashed border-rose-400 bg-rose-950/60 text-rose-300 font-bold text-[10px] sm:text-xs flex items-center justify-center shadow-sm select-none"
+                        title={`Restaurant 2 Best Response target at (${x}, ${y}) @ ₹${selectedBestResponse?.strategy?.price}`}
+                      >
+                        BR 2
                       </div>
                     ) : isEqBoth ? (
                       <div className="flex items-center gap-0.5">
@@ -298,17 +343,22 @@ export default function CityMap({
             {allocationMap.get(`${hoveredCell.x},${hoveredCell.y}`) && (
               <span>
                 {allocationMap.get(`${hoveredCell.x},${hoveredCell.y}`).choice === 'A' ? (
-                  <span className="text-sky-400 font-medium">Restaurant A (100%)</span>
+                  <span className="text-sky-400 font-medium">Restaurant 1 (100%)</span>
                 ) : allocationMap.get(`${hoveredCell.x},${hoveredCell.y}`).choice === 'B' ? (
-                  <span className="text-rose-400 font-medium">Restaurant B (100%)</span>
+                  <span className="text-rose-400 font-medium">Restaurant 2 (100%)</span>
                 ) : (
                   <span className="text-amber-400 font-medium">Split (50% / 50%)</span>
                 )}
               </span>
             )}
             <span className="text-slate-500 font-mono text-[11px]">
-              d(A)={distance(hoveredCell, locA).toFixed(1)}, d(B)={distance(hoveredCell, locB).toFixed(1)}
+              d(R1)={distance(hoveredCell, locA).toFixed(1)}, d(R2)={distance(hoveredCell, locB).toFixed(1)}
             </span>
+            {brLoc && hoveredCell.x === brLoc.x && hoveredCell.y === brLoc.y && (
+              <span className={`font-medium text-[11px] ${brPlayer === 'A' ? 'text-sky-300' : 'text-rose-300'}`}>
+                {`[R${brPlayer === 'A' ? '1' : '2'} Best Response Target: (${brLoc.x}, ${brLoc.y}) @ ₹${selectedBestResponse?.strategy?.price}]`}
+              </span>
+            )}
             {eqLocA && hoveredCell.x === eqLocA.x && hoveredCell.y === eqLocA.y && (
               <span className="text-sky-300 font-medium text-[11px]">
                 [Eq #{selectedEquilibrium?.id} A* target]
@@ -319,6 +369,14 @@ export default function CityMap({
                 [Eq #{selectedEquilibrium?.id} B* target]
               </span>
             )}
+          </div>
+        ) : selectedBestResponse && brLoc ? (
+          <div className="text-slate-300 flex items-center gap-2 flex-wrap">
+            <span className="text-slate-400">{`Inspecting Restaurant ${brPlayer === 'A' ? '1' : '2'} Best Response:`}</span>
+            <span className={`font-mono ${brPlayer === 'A' ? 'text-sky-300' : 'text-rose-300'}`}>
+              {`Target (${brLoc.x}, ${brLoc.y}) @ ₹${selectedBestResponse.strategy?.price}`}
+            </span>
+            <span className="text-slate-500 text-[11px]">(Outlined ghost pin on map)</span>
           </div>
         ) : selectedEquilibrium ? (
           <div className="text-slate-300 flex items-center gap-2 flex-wrap">
@@ -337,13 +395,25 @@ export default function CityMap({
         {/* Quiet Legend */}
         <div className="flex items-center gap-3 text-[11px] text-slate-400 select-none flex-wrap">
           <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded bg-sky-600" />
-            <span>Restaurant A</span>
+            <span className="w-2.5 h-2.5 rounded bg-sky-600 flex items-center justify-center text-[8px] text-white font-bold">1</span>
+            <span>Restaurant 1</span>
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded bg-rose-600" />
-            <span>Restaurant B</span>
+            <span className="w-2.5 h-2.5 rounded bg-rose-600 flex items-center justify-center text-[8px] text-white font-bold">2</span>
+            <span>Restaurant 2</span>
           </span>
+          {selectedBestResponse && (
+            <span className={`flex items-center gap-1 ${brPlayer === 'A' ? 'text-sky-300' : 'text-rose-300'}`}>
+              <span className={`w-3.5 h-2.5 rounded border border-dashed flex items-center justify-center text-[7px] font-bold ${
+                brPlayer === 'A'
+                  ? 'border-sky-400 bg-sky-950/50 text-sky-300'
+                  : 'border-rose-400 bg-rose-950/50 text-rose-300'
+              }`}>
+                BR
+              </span>
+              <span>{`BR Target (R${brPlayer === 'A' ? '1' : '2'})`}</span>
+            </span>
+          )}
           {selectedEquilibrium && (
             <>
               <span className="flex items-center gap-1 text-sky-300">
@@ -358,11 +428,11 @@ export default function CityMap({
           )}
           <span className="flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-sky-400/60" />
-            <span>A market</span>
+            <span>R1 market</span>
           </span>
           <span className="flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-rose-400/60" />
-            <span>B market</span>
+            <span>R2 market</span>
           </span>
         </div>
       </div>

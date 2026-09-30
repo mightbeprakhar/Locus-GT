@@ -62,7 +62,7 @@ export default function GameControls({
             <div className="flex items-center justify-between w-full mb-1">
               <span className="flex items-center gap-1.5 font-semibold text-xs text-sky-400">
                 <span className="w-2 h-2 rounded-full bg-sky-400" />
-                Restaurant A
+                Restaurant 1 <span className="text-[10px] text-slate-500 font-normal">(Firm A)</span>
               </span>
               {isA && (
                 <span className="text-[10px] font-medium text-sky-300 bg-sky-500/10 px-1.5 py-0.2 rounded border border-sky-500/30">
@@ -89,7 +89,7 @@ export default function GameControls({
             <div className="flex items-center justify-between w-full mb-1">
               <span className="flex items-center gap-1.5 font-semibold text-xs text-rose-400">
                 <span className="w-2 h-2 rounded-full bg-rose-400" />
-                Restaurant B
+                Restaurant 2 <span className="text-[10px] text-slate-500 font-normal">(Firm B)</span>
               </span>
               {!isA && (
                 <span className="text-[10px] font-medium text-rose-300 bg-rose-500/10 px-1.5 py-0.2 rounded border border-rose-500/30">
@@ -109,7 +109,7 @@ export default function GameControls({
       <div className="flex flex-col gap-2 pt-2 border-t border-slate-800/60">
         <div className="flex items-center justify-between text-xs">
           <label className="font-medium text-slate-300">
-            Price for {selectedRestaurant === 'A' ? 'Restaurant A' : 'Restaurant B'}
+            Price for {selectedRestaurant === 'A' ? 'Restaurant 1' : 'Restaurant 2'}
           </label>
           <span className="font-mono text-slate-200">
             Current: {`₹${activeStrategy.price}`}

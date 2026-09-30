@@ -106,10 +106,10 @@ export default function EquilibriumPanel({
           ) : (
             <>
               {playerA?.hasProfitableDeviation && (
-                <p>Restaurant A has a profitable unilateral deviation.</p>
+                <p>Restaurant 1 (Firm A) has a profitable unilateral deviation.</p>
               )}
               {playerB?.hasProfitableDeviation && (
-                <p>Restaurant B has a profitable unilateral deviation.</p>
+                <p>Restaurant 2 (Firm B) has a profitable unilateral deviation.</p>
               )}
             </>
           )}
@@ -121,10 +121,10 @@ export default function EquilibriumPanel({
         <h3 className="text-xs font-medium text-slate-300">Unilateral deviation analysis</h3>
 
         <div className="grid grid-cols-2 gap-3 text-xs">
-          {/* Restaurant A */}
+          {/* Restaurant 1 */}
           <div className="p-3 rounded-lg bg-slate-950/40 border border-slate-800/70 flex flex-col gap-2">
             <div className="flex items-center justify-between pb-1 border-b border-slate-800/60">
-              <span className="font-semibold text-sky-400">Restaurant A</span>
+              <span className="font-semibold text-sky-400">Restaurant 1 <span className="text-[10px] text-slate-500 font-normal">(Firm A)</span></span>
               <span
                 className={`text-[10px] font-medium ${
                   playerA?.hasProfitableDeviation ? 'text-amber-400' : 'text-emerald-400'
@@ -164,10 +164,10 @@ export default function EquilibriumPanel({
             </div>
           </div>
 
-          {/* Restaurant B */}
+          {/* Restaurant 2 */}
           <div className="p-3 rounded-lg bg-slate-950/40 border border-slate-800/70 flex flex-col gap-2">
             <div className="flex items-center justify-between pb-1 border-b border-slate-800/60">
-              <span className="font-semibold text-rose-400">Restaurant B</span>
+              <span className="font-semibold text-rose-400">Restaurant 2 <span className="text-[10px] text-slate-500 font-normal">(Firm B)</span></span>
               <span
                 className={`text-[10px] font-medium ${
                   playerB?.hasProfitableDeviation ? 'text-amber-400' : 'text-emerald-400'
@@ -336,7 +336,7 @@ export default function EquilibriumPanel({
             {/* Payoffs & Demands */}
             <div className="grid grid-cols-2 gap-2 text-[11px]">
               <div className="p-2 rounded bg-slate-900/60 border border-slate-800/60">
-                <div className="text-sky-400 font-medium">Restaurant A</div>
+                <div className="text-sky-400 font-medium">Restaurant 1 <span className="text-[10px] text-slate-500 font-normal">(Firm A)</span></div>
                 <div className="text-slate-200 font-mono font-semibold">
                   {`Profit: ₹${Math.round(selectedEquilibrium.payoffA).toLocaleString()}`}
                 </div>
@@ -346,7 +346,7 @@ export default function EquilibriumPanel({
               </div>
 
               <div className="p-2 rounded bg-slate-900/60 border border-slate-800/60">
-                <div className="text-rose-400 font-medium">Restaurant B</div>
+                <div className="text-rose-400 font-medium">Restaurant 2 <span className="text-[10px] text-slate-500 font-normal">(Firm B)</span></div>
                 <div className="text-slate-200 font-mono font-semibold">
                   {`Profit: ₹${Math.round(selectedEquilibrium.payoffB).toLocaleString()}`}
                 </div>

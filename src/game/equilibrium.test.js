@@ -10,6 +10,7 @@ import {
   checkPureNashEquilibrium,
   solvePureNashFromPayoffs,
   findPureNashEquilibria,
+  computeBestResponseAnalysis,
 } from './index.js';
 import { createUniformCity, createDefaultCity } from './city.js';
 
@@ -439,6 +440,115 @@ describe('LOCUS Game Theory Engine — Phase 2: Best Responses & Nash Equilibriu
         );
         expect(counterpartExists).toBe(true);
       }
+    });
+  });
+
+  // PHASE 4B — Best Response Analysis Engine Tests
+  describe('Phase 4B — Best Response Analysis Engine Tests', () => {
+    const city = createDefaultCity();
+
+    it('identifies profitable deviations and expected improvements on the initial baseline profile', () => {
+      const strategyA = { location: { x: 2, y: 5 }, price: 250 };
+      const strategyB = { location: { x: 7, y: 5 }, price: 250 };
+
+      const analysis = computeBestResponseAnalysis({
+        city,
+        strategyA,
+        strategyB,
+      });
+
+      expect(analysis.isNash).toBe(false);
+
+      // Restaurant 1 (Player A)
+      const r1 = analysis.restaurant1;
+      expect(r1.player).toBe('A');
+      expect(r1.current.location).toEqual({ x: 2, y: 5 });
+      expect(r1.current.price).toBe(250);
+      expect(r1.current.profit).toBe(1049400);
+      expect(r1.hasProfitableDeviation).toBe(true);
+      expect(r1.isBestResponse).toBe(false);
+      expect(r1.bestPayoff).toBe(1516800);
+      expect(r1.profitImprovement).toBe(467400);
+      expect(r1.bestResponses.length).toBeGreaterThan(0);
+      expect(r1.bestResponseDetails.length).toBe(r1.bestResponses.length);
+
+      // Each detail item contains complete economic outcome
+      for (const detail of r1.bestResponseDetails) {
+        expect(detail.strategy).toBeDefined();
+        expect(detail.payoff).toBe(r1.bestPayoff);
+        expect(detail.demand).toBeGreaterThan(0);
+        expect(detail.marketShare).toBeGreaterThan(0.5);
+      }
+
+      // Restaurant 2 (Player B) - symmetric profile
+      const r2 = analysis.restaurant2;
+      expect(r2.player).toBe('B');
+      expect(r2.current.location).toEqual({ x: 7, y: 5 });
+      expect(r2.current.price).toBe(250);
+      expect(r2.current.profit).toBe(1049400);
+      expect(r2.hasProfitableDeviation).toBe(true);
+      expect(r2.isBestResponse).toBe(false);
+      expect(r2.profitImprovement).toBe(467400);
+      expect(r2.bestResponseDetails.length).toBe(r2.bestResponses.length);
+    });
+
+    it('recognizes equilibrium profile with zero profitable deviation and handles tied best responses', () => {
+      // Known pure Nash equilibrium profile: A(4, 4) @ 150 vs B(4, 4) @ 150
+      const strategyA = { location: { x: 4, y: 4 }, price: 150 };
+      const strategyB = { location: { x: 4, y: 4 }, price: 150 };
+
+      const analysis = computeBestResponseAnalysis({
+        city,
+        strategyA,
+        strategyB,
+      });
+
+      expect(analysis.isNash).toBe(true);
+
+      // Restaurant 1 has no profitable deviation
+      const r1 = analysis.restaurant1;
+      expect(r1.hasProfitableDeviation).toBe(false);
+      expect(r1.isBestResponse).toBe(true);
+      expect(r1.profitImprovement).toBe(0);
+      expect(r1.bestPayoff).toBe(r1.current.profit);
+
+      // Multiple tied best responses exist at equilibrium
+      expect(r1.tiedCount).toBeGreaterThanOrEqual(1);
+      expect(r1.bestResponses).toContainEqual(strategyA);
+      expect(r1.bestResponseDetails.length).toBe(r1.tiedCount);
+
+      // Restaurant 2 has no profitable deviation
+      const r2 = analysis.restaurant2;
+      expect(r2.hasProfitableDeviation).toBe(false);
+      expect(r2.isBestResponse).toBe(true);
+      expect(r2.profitImprovement).toBe(0);
+      expect(r2.bestPayoff).toBe(r2.current.profit);
+      expect(r2.tiedCount).toBeGreaterThanOrEqual(1);
+      expect(r2.bestResponses).toContainEqual(strategyB);
+    });
+
+    it('findBestResponses includes bestResponseDetails with demand and market shares for all tied responses', () => {
+      // Single customer setup where multiple candidate prices/locations tie
+      const miniCity = [{ x: 0, y: 0, population: 100 }];
+      const opponent = { location: { x: 9, y: 9 }, price: 350 };
+
+      // Two candidate strategies with identical payoff
+      const s1 = { location: { x: 0, y: 0 }, price: 250 }; // captures all, margin 150 -> profit 15,000 - 50,000 = -35,000
+      const s2 = { location: { x: 0, y: 0 }, price: 250 }; // identical
+
+      const result = findBestResponses({
+        player: 'A',
+        opponentStrategy: opponent,
+        strategySpace: [s1, s2],
+        city: miniCity,
+        fixedCost: 0,
+      });
+
+      expect(result.bestResponses).toHaveLength(2);
+      expect(result.bestResponseDetails).toHaveLength(2);
+      expect(result.bestResponseDetails[0].payoff).toBe(result.bestResponseDetails[1].payoff);
+      expect(result.bestResponseDetails[0].demand).toBe(100);
+      expect(result.bestResponseDetails[0].marketShare).toBe(1);
     });
   });
 });
