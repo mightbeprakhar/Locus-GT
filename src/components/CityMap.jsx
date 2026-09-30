@@ -1,12 +1,11 @@
 /**
  * @file CityMap.jsx
- * @description Interactive 10x10 2D city grid displaying customer zones, population density,
- * consumer market capture, and draggable/clickable restaurant positions.
+ * @description Spatial simulation view displaying customer zones, population density,
+ * market capture, and restaurant locations.
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, Fragment } from 'react';
 import { motion } from 'motion/react';
-import { MapPin, Users, Store, Crosshair } from 'lucide-react';
 import { distance } from '../game/utility.js';
 
 /**
@@ -28,7 +27,7 @@ export default function CityMap({
 }) {
   const [hoveredCell, setHoveredCell] = useState(null);
 
-  // Determine min and max population for relative density coloring
+  // Compute population bounds, cell lookup, and market allocations
   const { minPop, maxPop, cellMap, allocationMap } = useMemo(() => {
     let min = Infinity;
     let max = -Infinity;
@@ -58,265 +57,219 @@ export default function CityMap({
   const locA = strategyA.location;
   const locB = strategyB.location;
 
-  // Active restaurant info for display
   const activeName = selectedRestaurant === 'A' ? 'Restaurant A' : 'Restaurant B';
-  const activeColor = selectedRestaurant === 'A' ? 'text-cyan-400' : 'text-rose-400';
+  const activeColor = selectedRestaurant === 'A' ? 'text-sky-400' : 'text-rose-400';
 
   return (
-    <div className="flex flex-col h-full bg-slate-950/70 border border-slate-800/80 rounded-2xl p-5 shadow-2xl backdrop-blur-sm">
-      {/* Header bar */}
-      <div className="flex items-center justify-between pb-4 mb-3 border-b border-slate-800/80">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-lg bg-slate-900 border border-slate-700/60 text-cyan-400">
-            <Store className="w-4 h-4" />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold tracking-wider uppercase text-slate-200">
-              City Customer Grid (10 × 10)
-            </h2>
-            <p className="text-xs text-slate-400">
-              {city.cells.length} Customer Zones • {city.totalPopulation.toLocaleString()} Total Population
-            </p>
-          </div>
+    <section className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-4 sm:p-5 flex flex-col gap-4">
+      {/* Map Header */}
+      <div className="flex items-center justify-between pb-3 border-b border-slate-800/70">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-200">City</h2>
+          <p className="text-xs text-slate-400">
+            10 × 10 grid · {city.cells.length} customer zones · {city.totalPopulation.toLocaleString()} population
+          </p>
         </div>
 
-        {/* Selected target hint */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/90 border border-slate-700/70 text-xs">
-          <span className="text-slate-400">Moving Target:</span>
-          <span className={`font-semibold flex items-center gap-1.5 ${activeColor}`}>
+        {/* Selected target indicator */}
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          <span>Selected:</span>
+          <span className={`font-medium flex items-center gap-1.5 ${activeColor}`}>
             <span
               className={`w-2 h-2 rounded-full ${
-                selectedRestaurant === 'A' ? 'bg-cyan-400' : 'bg-rose-400'
-              } animate-pulse`}
+                selectedRestaurant === 'A' ? 'bg-sky-400' : 'bg-rose-400'
+              }`}
             />
             {activeName}
           </span>
         </div>
       </div>
 
-      {/* Grid container with coordinate headers */}
-      <div className="flex-1 flex flex-col items-center justify-center min-h-[460px] p-2">
-        <div className="relative inline-block">
-          {/* Top X coordinate numbers */}
-          <div className="flex ml-7 mb-1.5 text-[10px] font-mono font-medium text-slate-400 select-none">
-            {Array.from({ length: 10 }, (_, x) => (
-              <div key={x} className="w-10 sm:w-11 md:w-12 text-center">
-                {x}
-              </div>
-            ))}
-          </div>
+      {/* Grid container with shared CSS grid coordinate layout */}
+      <div className="flex flex-col items-center justify-center p-2 overflow-x-auto max-w-full">
+        <div
+          className="inline-grid grid-cols-[1rem_repeat(10,2.5rem)] sm:grid-cols-[1.25rem_repeat(10,2.75rem)] md:grid-cols-[1.25rem_repeat(10,3rem)] gap-1 p-2 sm:p-2.5 rounded-lg bg-slate-950/70 border border-slate-800/90 shadow-sm select-none"
+          role="grid"
+          aria-label="City customer zones"
+        >
+          {/* Top-Left Corner Spacer (Row 0, Col 0) */}
+          <div className="w-full h-5" aria-hidden="true" />
 
-          <div className="flex">
-            {/* Left Y coordinate numbers */}
-            <div className="flex flex-col mr-1.5 text-[10px] font-mono font-medium text-slate-400 select-none justify-around">
-              {Array.from({ length: 10 }, (_, y) => (
-                <div key={y} className="h-10 sm:h-11 md:h-12 flex items-center justify-center w-5">
-                  {y}
-                </div>
-              ))}
-            </div>
-
-            {/* 10 x 10 Cell Matrix */}
+          {/* Top X Coordinate Headers (Row 0, Cols 1..10) */}
+          {Array.from({ length: 10 }, (_, x) => (
             <div
-              className="grid grid-cols-10 gap-1 sm:gap-1.5 p-2 rounded-xl bg-slate-900/90 border border-slate-800 shadow-inner"
-              role="grid"
-              aria-label="City customer zones"
+              key={`header-x-${x}`}
+              className="h-5 flex items-center justify-center font-mono text-[10px] text-slate-500 font-medium"
+              aria-hidden="true"
             >
-              {Array.from({ length: 10 }, (_, y) =>
-                Array.from({ length: 10 }, (_, x) => {
-                  const cell = cellMap.get(`${x},${y}`) ?? { x, y, population: 100 };
-                  const alloc = allocationMap.get(`${x},${y}`);
-
-                  const isA = locA.x === x && locA.y === y;
-                  const isB = locB.x === x && locB.y === y;
-                  const isBoth = isA && isB;
-
-                  // Normalized density ratio (0 to 1)
-                  const popRatio =
-                    maxPop > minPop ? (cell.population - minPop) / (maxPop - minPop) : 0.5;
-
-                  // Market dominance styling
-                  let marketBorder = 'border-slate-800/80';
-                  let marketDot = null;
-                  if (alloc) {
-                    if (alloc.choice === 'A') {
-                      marketDot = 'bg-cyan-400/80';
-                      marketBorder = 'hover:border-cyan-400/70';
-                    } else if (alloc.choice === 'B') {
-                      marketDot = 'bg-rose-400/80';
-                      marketBorder = 'hover:border-rose-400/70';
-                    } else {
-                      marketDot = 'bg-amber-400/80';
-                      marketBorder = 'hover:border-amber-400/70';
-                    }
-                  }
-
-                  const isCellHovered = hoveredCell?.x === x && hoveredCell?.y === y;
-
-                  return (
-                    <button
-                      key={`${x},${y}`}
-                      type="button"
-                      onClick={() => onSelectLocation({ x, y })}
-                      onMouseEnter={() => setHoveredCell(cell)}
-                      onMouseLeave={() => setHoveredCell(null)}
-                      onFocus={() => setHoveredCell(cell)}
-                      onBlur={() => setHoveredCell(null)}
-                      aria-label={`Zone (${x}, ${y}), population ${cell.population}${
-                        isA ? ', Restaurant A here' : ''
-                      }${isB ? ', Restaurant B here' : ''}`}
-                      className={`relative w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-lg border transition-all duration-150 flex flex-col items-center justify-between p-1 select-none focus:outline-none focus:ring-2 focus:ring-cyan-400/60 cursor-pointer ${marketBorder} ${
-                        isCellHovered
-                          ? 'ring-2 ring-slate-300/40 scale-105 z-20'
-                          : 'hover:scale-[1.02]'
-                      }`}
-                      style={{
-                        backgroundColor: `rgba(30, 41, 59, ${0.35 + popRatio * 0.45})`,
-                      }}
-                    >
-                      {/* Top micro info: zone coordinate or market dot */}
-                      <div className="w-full flex items-center justify-between px-0.5">
-                        <span className="text-[9px] font-mono text-slate-400/70 leading-none">
-                          {`${x},${y}`}
-                        </span>
-                        {marketDot && !isBoth && !isA && !isB && (
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${marketDot} shadow-sm`}
-                            title={`Captured by: ${alloc?.choice}`}
-                          />
-                        )}
-                      </div>
-
-                      {/* Center Restaurant Marker(s) */}
-                      <div className="flex-1 flex items-center justify-center w-full">
-                        {isBoth ? (
-                          <div className="flex items-center -space-x-1">
-                            <motion.div
-                              layoutId="marker-both-A"
-                              className={`w-5 h-5 rounded-md bg-cyan-500 text-slate-950 font-black text-[11px] flex items-center justify-center shadow-lg shadow-cyan-500/40 border border-cyan-200 ${
-                                selectedRestaurant === 'A' ? 'ring-2 ring-cyan-300' : ''
-                              }`}
-                            >
-                              A
-                            </motion.div>
-                            <motion.div
-                              layoutId="marker-both-B"
-                              className={`w-5 h-5 rounded-md bg-rose-500 text-slate-950 font-black text-[11px] flex items-center justify-center shadow-lg shadow-rose-500/40 border border-rose-200 ${
-                                selectedRestaurant === 'B' ? 'ring-2 ring-rose-300' : ''
-                              }`}
-                            >
-                              B
-                            </motion.div>
-                          </div>
-                        ) : isA ? (
-                          <motion.div
-                            layoutId="marker-A"
-                            className={`relative w-7 h-7 rounded-md bg-cyan-500 text-slate-950 font-black text-xs flex items-center justify-center shadow-md shadow-cyan-500/50 border border-cyan-200 ${
-                              selectedRestaurant === 'A'
-                                ? 'ring-2 ring-cyan-300 ring-offset-1 ring-offset-slate-950 scale-110'
-                                : ''
-                            }`}
-                          >
-                            A
-                            {selectedRestaurant === 'A' && (
-                              <span className="absolute -top-1 -right-1 w-2 h-2 bg-cyan-300 rounded-full animate-ping" />
-                            )}
-                          </motion.div>
-                        ) : isB ? (
-                          <motion.div
-                            layoutId="marker-B"
-                            className={`relative w-7 h-7 rounded-md bg-rose-500 text-slate-950 font-black text-xs flex items-center justify-center shadow-md shadow-rose-500/50 border border-rose-200 ${
-                              selectedRestaurant === 'B'
-                                ? 'ring-2 ring-rose-300 ring-offset-1 ring-offset-slate-950 scale-110'
-                                : ''
-                            }`}
-                          >
-                            B
-                            {selectedRestaurant === 'B' && (
-                              <span className="absolute -top-1 -right-1 w-2 h-2 bg-rose-300 rounded-full animate-ping" />
-                            )}
-                          </motion.div>
-                        ) : (
-                          // Subtle population text when no restaurant is present
-                          <span className="text-[10px] font-mono text-slate-400/80 font-medium">
-                            {cell.population}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Bottom density micro-bar */}
-                      <div className="w-full h-1 bg-slate-950/60 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-slate-500/40 rounded-full"
-                          style={{ width: `${Math.round(popRatio * 100)}%` }}
-                        />
-                      </div>
-                    </button>
-                  );
-                })
-              )}
+              {x}
             </div>
-          </div>
+          ))}
+
+          {/* Grid Rows: Y header in Col 0, followed by 10 cells in Cols 1..10 */}
+          {Array.from({ length: 10 }, (_, y) => (
+            <Fragment key={`row-${y}`}>
+              {/* Left Y Coordinate Header (Col 0) */}
+              <div
+                className="h-10 sm:h-11 md:h-12 flex items-center justify-center font-mono text-[10px] text-slate-500 font-medium"
+                aria-hidden="true"
+              >
+                {y}
+              </div>
+
+              {/* 10 Cells for Row y (Cols 1..10) */}
+              {Array.from({ length: 10 }, (_, x) => {
+                const cell = cellMap.get(`${x},${y}`) ?? { x, y, population: 100 };
+                const alloc = allocationMap.get(`${x},${y}`);
+
+                const isA = locA.x === x && locA.y === y;
+                const isB = locB.x === x && locB.y === y;
+                const isBoth = isA && isB;
+
+                // Normalized density ratio (0 to 1)
+                const popRatio =
+                  maxPop > minPop ? (cell.population - minPop) / (maxPop - minPop) : 0.5;
+
+                // Market capture dot styling
+                let marketDot = null;
+                if (alloc && !isA && !isB && !isBoth) {
+                  if (alloc.choice === 'A') {
+                    marketDot = 'bg-sky-400/60';
+                  } else if (alloc.choice === 'B') {
+                    marketDot = 'bg-rose-400/60';
+                  } else {
+                    marketDot = 'bg-amber-400/60';
+                  }
+                }
+
+                const isCellHovered = hoveredCell?.x === x && hoveredCell?.y === y;
+
+                return (
+                  <button
+                    key={`${x},${y}`}
+                    type="button"
+                    onClick={() => onSelectLocation({ x, y })}
+                    onMouseEnter={() => setHoveredCell(cell)}
+                    onMouseLeave={() => setHoveredCell(null)}
+                    onFocus={() => setHoveredCell(cell)}
+                    onBlur={() => setHoveredCell(null)}
+                    aria-label={`Zone (${x}, ${y}), population ${cell.population}${
+                      isA ? ', Restaurant A' : ''
+                    }${isB ? ', Restaurant B' : ''}`}
+                    className={`relative w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded border transition-colors flex items-center justify-center cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 ${
+                      isCellHovered
+                        ? 'border-slate-500 z-10'
+                        : 'border-slate-800/60 hover:border-slate-700'
+                    }`}
+                    style={{
+                      backgroundColor: `rgba(30, 41, 59, ${0.15 + popRatio * 0.45})`,
+                    }}
+                  >
+                    {/* Restaurant Markers */}
+                    {isBoth ? (
+                      <div className="flex items-center gap-0.5">
+                        <motion.div
+                          layoutId="marker-both-A"
+                          className={`w-4 h-4 sm:w-5 sm:h-5 rounded bg-sky-600 text-white font-bold text-[10px] flex items-center justify-center ${
+                            selectedRestaurant === 'A' ? 'ring-1 ring-sky-300' : ''
+                          }`}
+                        >
+                          A
+                        </motion.div>
+                        <motion.div
+                          layoutId="marker-both-B"
+                          className={`w-4 h-4 sm:w-5 sm:h-5 rounded bg-rose-600 text-white font-bold text-[10px] flex items-center justify-center ${
+                            selectedRestaurant === 'B' ? 'ring-1 ring-rose-300' : ''
+                          }`}
+                        >
+                          B
+                        </motion.div>
+                      </div>
+                    ) : isA ? (
+                      <motion.div
+                        layoutId="marker-A"
+                        className={`w-6 h-6 sm:w-7 sm:h-7 rounded bg-sky-600 text-white font-bold text-xs flex items-center justify-center ${
+                          selectedRestaurant === 'A' ? 'ring-2 ring-sky-300' : ''
+                        }`}
+                      >
+                        A
+                      </motion.div>
+                    ) : isB ? (
+                      <motion.div
+                        layoutId="marker-B"
+                        className={`w-6 h-6 sm:w-7 sm:h-7 rounded bg-rose-600 text-white font-bold text-xs flex items-center justify-center ${
+                          selectedRestaurant === 'B' ? 'ring-2 ring-rose-300' : ''
+                        }`}
+                      >
+                        B
+                      </motion.div>
+                    ) : (
+                      marketDot && (
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${marketDot}`}
+                          aria-hidden="true"
+                        />
+                      )
+                    )}
+                  </button>
+                );
+              })}
+            </Fragment>
+          ))}
         </div>
       </div>
 
-      {/* Map Footer: Telemetry & Inspector Bar */}
-      <div className="mt-3 pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-2">
+      {/* Map Footer: Inspector & Legend */}
+      <div className="pt-3 border-t border-slate-800/70 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-2">
         {hoveredCell ? (
-          <div className="flex items-center gap-4 flex-wrap">
-            <span className="flex items-center gap-1.5 font-mono text-slate-200">
-              <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="font-mono text-slate-200">
               Zone ({hoveredCell.x}, {hoveredCell.y})
             </span>
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <Users className="w-3.5 h-3.5 text-slate-400" />
-              Pop: <strong className="text-white">{hoveredCell.population}</strong>
+            <span className="text-slate-300">
+              {hoveredCell.population} customers
             </span>
             {allocationMap.get(`${hoveredCell.x},${hoveredCell.y}`) && (
-              <span className="flex items-center gap-1.5">
-                Market:{' '}
+              <span>
                 {allocationMap.get(`${hoveredCell.x},${hoveredCell.y}`).choice === 'A' ? (
-                  <strong className="text-cyan-400">Restaurant A (100%)</strong>
+                  <span className="text-sky-400 font-medium">Restaurant A (100%)</span>
                 ) : allocationMap.get(`${hoveredCell.x},${hoveredCell.y}`).choice === 'B' ? (
-                  <strong className="text-rose-400">Restaurant B (100%)</strong>
+                  <span className="text-rose-400 font-medium">Restaurant B (100%)</span>
                 ) : (
-                  <strong className="text-amber-400">Split (50% / 50%)</strong>
+                  <span className="text-amber-400 font-medium">Split (50% / 50%)</span>
                 )}
               </span>
             )}
-            <span className="text-slate-400 text-[11px]">
-              Dist: A={distance(hoveredCell, locA).toFixed(1)}, B={distance(hoveredCell, locB).toFixed(1)}
+            <span className="text-slate-500 font-mono text-[11px]">
+              d(A)={distance(hoveredCell, locA).toFixed(1)}, d(B)={distance(hoveredCell, locB).toFixed(1)}
             </span>
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-slate-400">
-            <MapPin className="w-3.5 h-3.5 text-cyan-400" />
-            <span>
-              Click any cell to relocate <strong className={activeColor}>{activeName}</strong>.
-            </span>
+          <div className="text-slate-400">
+            Click any cell to relocate <span className={activeColor}>{activeName}</span>.
           </div>
         )}
 
-        {/* Legend */}
-        <div className="flex items-center gap-3 text-[11px] font-medium">
+        {/* Quiet Legend */}
+        <div className="flex items-center gap-3 text-[11px] text-slate-400 select-none">
           <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded bg-cyan-500 shadow-sm" />
-            <span>Rest. A</span>
+            <span className="w-2.5 h-2.5 rounded bg-sky-600" />
+            <span>Restaurant A</span>
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded bg-rose-500 shadow-sm" />
-            <span>Rest. B</span>
+            <span className="w-2.5 h-2.5 rounded bg-rose-600" />
+            <span>Restaurant B</span>
           </span>
-          <span className="flex items-center gap-1 text-slate-400">
-            <span className="w-2 h-2 rounded-full bg-cyan-400/80 inline-block" />
-            <span>A Dem.</span>
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-sky-400/60" />
+            <span>A market</span>
           </span>
-          <span className="flex items-center gap-1 text-slate-400">
-            <span className="w-2 h-2 rounded-full bg-rose-400/80 inline-block" />
-            <span>B Dem.</span>
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-400/60" />
+            <span>B market</span>
           </span>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

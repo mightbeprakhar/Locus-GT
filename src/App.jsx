@@ -1,19 +1,10 @@
 /**
  * @file App.jsx
  * @description Main application shell for LOCUS: Spatial Game Theory Laboratory.
- * Orchestrates game state, city map, economic telemetry, and equilibrium diagnostics.
+ * Coordinates simulation state, spatial visualization, payoffs, and equilibrium diagnostics.
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import {
-  RotateCcw,
-  Compass,
-  Cpu,
-  Layers,
-  Activity,
-  CheckCircle,
-  AlertCircle,
-} from 'lucide-react';
 import CityMap from './components/CityMap.jsx';
 import GameControls from './components/GameControls.jsx';
 import PayoffPanel from './components/PayoffPanel.jsx';
@@ -22,7 +13,7 @@ import { createDefaultCity } from './game/city.js';
 import { evaluateProfile } from './game/payoff.js';
 import { checkPureNashEquilibrium } from './game/equilibrium.js';
 
-// Canonical initial baseline strategy profile
+// Baseline strategy profile
 const INITIAL_STRATEGY_A = Object.freeze({
   location: { x: 2, y: 5 },
   price: 250,
@@ -34,17 +25,17 @@ const INITIAL_STRATEGY_B = Object.freeze({
 });
 
 export default function App() {
-  // Deterministic 10x10 city grid (created once)
+  // Deterministic 10x10 city grid
   const city = useMemo(() => createDefaultCity(), []);
 
-  // Canonical player strategies: { location: { x, y }, price }
+  // Player strategies: { location: { x, y }, price }
   const [strategyA, setStrategyA] = useState(INITIAL_STRATEGY_A);
   const [strategyB, setStrategyB] = useState(INITIAL_STRATEGY_B);
 
-  // Active controlled restaurant for relocation and price changes
+  // Active controlled restaurant for relocation and pricing
   const [selectedRestaurant, setSelectedRestaurant] = useState('A');
 
-  // Live profile evaluation (allocations included for cell coloring and inspector HUD)
+  // Profile evaluation (allocations included for market visualization)
   const evaluation = useMemo(() => {
     return evaluateProfile({
       city,
@@ -54,7 +45,7 @@ export default function App() {
     });
   }, [city, strategyA, strategyB]);
 
-  // Real-time pure Nash equilibrium diagnostic for current profile
+  // Real-time pure Nash equilibrium diagnostic
   const equilibriumStatus = useMemo(() => {
     return checkPureNashEquilibrium({
       strategyA,
@@ -104,71 +95,50 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#070b12] text-slate-100 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
-      {/* Top Header Area */}
-      <header className="sticky top-0 z-40 bg-[#090e18]/90 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-6 py-3 flex items-center justify-between shadow-md">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-gradient-to-br from-cyan-500/20 to-indigo-500/20 border border-cyan-500/40 text-cyan-400 shadow-sm shadow-cyan-500/20">
-            <Compass className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base sm:text-lg font-black tracking-wider text-white">
-                LOCUS
-              </h1>
-              <span className="text-[10px] font-mono font-bold tracking-widest px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 uppercase">
-                Phase 3 Lab
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 tracking-wide">
-              Spatial Game Theory Laboratory • Modified Hotelling Duopoly Model
-            </p>
-          </div>
+    <div className="min-h-screen bg-[#080c14] text-slate-100 flex flex-col font-sans">
+      {/* Header */}
+      <header className="border-b border-slate-800/80 bg-[#090d16] px-4 sm:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-base sm:text-lg font-bold tracking-tight text-slate-100">
+            LOCUS
+          </h1>
+          <p className="text-xs text-slate-400">
+            Spatial Game Theory Laboratory
+          </p>
         </div>
 
-        {/* Global HUD status telemetry */}
-        <div className="hidden md:flex items-center gap-4 text-xs font-mono">
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-900/80 border border-slate-800 text-slate-300">
-            <Layers className="w-3.5 h-3.5 text-slate-400" />
-            <span>Grid: 10×10</span>
-          </div>
-
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-900/80 border border-slate-800 text-slate-300">
-            <Cpu className="w-3.5 h-3.5 text-slate-400" />
-            <span>Pop: {city.totalPopulation.toLocaleString()}</span>
-          </div>
-
-          <div
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg border font-semibold ${
+        {/* Compact Metadata / Status Row */}
+        <div className="flex items-center gap-3 text-xs">
+          <span className="text-slate-400 font-mono">10 × 10 grid</span>
+          <span className="text-slate-600">·</span>
+          <span className="text-slate-400">
+            {city.totalPopulation.toLocaleString()} customers
+          </span>
+          <span className="text-slate-600">·</span>
+          <span
+            className={`font-medium px-2 py-0.5 rounded text-[11px] border ${
               equilibriumStatus.isNash
-                ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
+                ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
                 : 'bg-amber-950/30 border-amber-500/40 text-amber-300'
             }`}
           >
-            {equilibriumStatus.isNash ? (
-              <CheckCircle className="w-3.5 h-3.5" />
-            ) : (
-              <AlertCircle className="w-3.5 h-3.5" />
-            )}
-            <span>{equilibriumStatus.isNash ? 'Pure Nash' : 'Unstable Profile'}</span>
-          </div>
-
+            {equilibriumStatus.isNash ? 'Nash equilibrium' : 'Not a Nash equilibrium'}
+          </span>
+          <span className="text-slate-600">·</span>
           <button
             type="button"
             onClick={handleReset}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 active:bg-slate-700 text-slate-300 border border-slate-700/80 transition-colors cursor-pointer"
-            title="Reset simulation to initial baseline"
+            className="text-xs text-slate-300 hover:text-white bg-slate-800/60 hover:bg-slate-700/60 px-2.5 py-1 rounded border border-slate-700/60 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Reset</span>
+            Reset
           </button>
         </div>
       </header>
 
       {/* Main Workspace Layout */}
-      <main className="flex-1 max-w-[1720px] w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left / Center Section: Interactive City Map Workspace */}
-        <section className="lg:col-span-7 xl:col-span-7 flex flex-col gap-4">
+      <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left: City Map Simulation */}
+        <div className="lg:col-span-7 xl:col-span-7">
           <CityMap
             city={city}
             strategyA={strategyA}
@@ -177,10 +147,10 @@ export default function App() {
             onSelectLocation={handleSelectLocation}
             evaluation={evaluation}
           />
-        </section>
+        </div>
 
-        {/* Right Section: Strategic Controls, Payoffs, and Equilibrium Panel */}
-        <section className="lg:col-span-5 xl:col-span-5 flex flex-col gap-5">
+        {/* Right: Analytical Sidebar */}
+        <div className="lg:col-span-5 xl:col-span-5 flex flex-col gap-4">
           <GameControls
             strategyA={strategyA}
             strategyB={strategyB}
@@ -202,22 +172,16 @@ export default function App() {
             strategyA={strategyA}
             strategyB={strategyB}
           />
-        </section>
+        </div>
       </main>
 
-      {/* Footer / Status bar */}
-      <footer className="mt-auto border-t border-slate-900 bg-[#05080e] px-6 py-2.5 text-[11px] text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Activity className="w-3 h-3 text-cyan-400" />
-          <span>LOCUS Pure Mathematical Engine Active</span>
-          <span>•</span>
-          <span>Euclidean Spatial Metric</span>
-          <span>•</span>
-          <span>Strict Discrete Pricing Strategy</span>
+      {/* Footer */}
+      <footer className="mt-auto border-t border-slate-800/80 bg-[#060910] px-4 sm:px-8 py-3 text-xs text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2">
+        <div>
+          Model: Euclidean travel distance · discrete prices · full market coverage
         </div>
-        <div className="font-mono text-slate-400">
-          State: A({strategyA.location.x},{strategyA.location.y}) @ ${strategyA.price} vs B(
-          {strategyB.location.x},{strategyB.location.y}) @ ${strategyB.price}
+        <div className="font-mono text-[11px] text-slate-400">
+          A({strategyA.location.x}, {strategyA.location.y}) at ₹{strategyA.price} vs B({strategyB.location.x}, {strategyB.location.y}) at ₹{strategyB.price}
         </div>
       </footer>
     </div>

@@ -1,9 +1,9 @@
 /**
  * @file PayoffPanel.jsx
- * @description Real-time economic telemetry displaying demand, market share, and profits for both firms.
+ * @description Economic payoffs panel displaying demand, market share, profit, and unit margin.
  */
 
-import { TrendingUp, PieChart } from 'lucide-react';
+import { DEFAULT_VARIABLE_COST } from '../game/types.js';
 
 /**
  * @param {Object} props
@@ -25,150 +25,143 @@ export default function PayoffPanel({ evaluation, strategyA, strategyB }) {
   const shareAPct = (marketShareA * 100).toFixed(1);
   const shareBPct = (marketShareB * 100).toFixed(1);
 
-  // Format profit into clean currency display
-  const formatProfit = (val) => {
-    const formatted = Math.abs(val).toLocaleString();
-    if (val < 0) {
-      return `-$${formatted}`;
-    }
-    return `$${formatted}`;
+  const marginA = strategyA.price - DEFAULT_VARIABLE_COST;
+  const marginB = strategyB.price - DEFAULT_VARIABLE_COST;
+
+  const formatCurrency = (val) => {
+    const formatted = Math.abs(Math.round(val)).toLocaleString();
+    return val < 0 ? `-₹${formatted}` : `₹${formatted}`;
   };
 
   return (
-    <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-5 shadow-xl backdrop-blur-sm flex flex-col gap-4">
-      {/* Panel Header */}
-      <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-700/60 text-cyan-400">
-            <TrendingUp className="w-4 h-4" />
-          </div>
-          <h3 className="text-sm font-semibold tracking-wider uppercase text-slate-200">
-            Economic Telemetry & Payoffs
-          </h3>
+    <section className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-4 sm:p-5 flex flex-col gap-4">
+      {/* Section Header */}
+      <div className="flex items-center justify-between pb-3 border-b border-slate-800/70">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-200">Payoffs</h2>
+          <p className="text-xs text-slate-400">Firm economic outcomes at current strategy profile</p>
         </div>
-        <div className="text-[11px] font-mono text-slate-400">
-          Total Market: <strong className="text-white">{totalPopulation.toLocaleString()}</strong>
+        <div className="text-xs text-slate-400">
+          Total market: <span className="font-mono text-slate-200">{totalPopulation.toLocaleString()}</span>
         </div>
       </div>
 
-      {/* Dual Comparative Cards */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* Restaurant A Telemetry */}
-        <div className="bg-slate-900/60 border border-cyan-500/30 rounded-xl p-3.5 flex flex-col gap-2 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-cyan-500/80" />
-          <div className="flex items-center justify-between">
-            <span className="font-bold text-xs text-cyan-400 flex items-center gap-1.5">
-              <span className="w-3.5 h-3.5 rounded bg-cyan-500 text-slate-950 text-[10px] font-black flex items-center justify-center">
-                A
-              </span>
+      {/* Firm Outcomes Comparison */}
+      <div className="grid grid-cols-2 gap-4">
+        {/* Restaurant A */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/60">
+            <span className="text-xs font-semibold text-sky-400 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-sky-400" />
               Restaurant A
             </span>
-            <span className="text-[11px] font-mono text-slate-400">
-              {`P=$${strategyA.price}`}
-            </span>
+            <span className="text-xs font-mono text-slate-400">{`₹${strategyA.price}`}</span>
           </div>
 
-          <div className="mt-1 flex flex-col gap-1">
-            <div className="flex items-baseline justify-between">
-              <span className="text-xs text-slate-400">Profit (π):</span>
-              <span
-                className={`text-base font-mono font-bold ${
-                  profitA < 0 ? 'text-rose-400' : 'text-emerald-400'
+          <div className="space-y-2.5">
+            <div>
+              <div className="text-[11px] text-slate-400">Profit</div>
+              <div
+                className={`text-base font-mono font-semibold ${
+                  profitA < 0 ? 'text-rose-400' : 'text-slate-100'
                 }`}
               >
-                {formatProfit(profitA)}
-              </span>
+                {formatCurrency(profitA)}
+              </div>
             </div>
 
-            <div className="flex items-baseline justify-between text-xs">
-              <span className="text-slate-400">Demand (D):</span>
-              <span className="font-mono font-semibold text-slate-200">
-                {Math.round(demandA).toLocaleString()}{' '}
-                <span className="text-slate-400 font-normal">({shareAPct}%)</span>
-              </span>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>
+                <div className="text-[11px] text-slate-400">Demand</div>
+                <div className="font-mono font-medium text-slate-200">
+                  {Math.round(demandA).toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] text-slate-400">Market share</div>
+                <div className="font-mono font-medium text-slate-200">{shareAPct}%</div>
+              </div>
             </div>
 
-            <div className="flex items-baseline justify-between text-xs">
-              <span className="text-slate-400">Margin / Unit:</span>
-              <span className="font-mono text-slate-300">
-                {`$${strategyA.price - 100}`}
-              </span>
+            <div>
+              <div className="text-[11px] text-slate-400">Margin</div>
+              <div className="text-xs font-mono text-slate-300">
+                {`₹${marginA}`}{' '}
+                <span className="text-[10px] text-slate-500">/ unit</span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Restaurant B Telemetry */}
-        <div className="bg-slate-900/60 border border-rose-500/30 rounded-xl p-3.5 flex flex-col gap-2 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-rose-500/80" />
-          <div className="flex items-center justify-between">
-            <span className="font-bold text-xs text-rose-400 flex items-center gap-1.5">
-              <span className="w-3.5 h-3.5 rounded bg-rose-500 text-slate-950 text-[10px] font-black flex items-center justify-center">
-                B
-              </span>
+        {/* Restaurant B */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/60">
+            <span className="text-xs font-semibold text-rose-400 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-rose-400" />
               Restaurant B
             </span>
-            <span className="text-[11px] font-mono text-slate-400">
-              {`P=$${strategyB.price}`}
-            </span>
+            <span className="text-xs font-mono text-slate-400">{`₹${strategyB.price}`}</span>
           </div>
 
-          <div className="mt-1 flex flex-col gap-1">
-            <div className="flex items-baseline justify-between">
-              <span className="text-xs text-slate-400">Profit (π):</span>
-              <span
-                className={`text-base font-mono font-bold ${
-                  profitB < 0 ? 'text-rose-400' : 'text-emerald-400'
+          <div className="space-y-2.5">
+            <div>
+              <div className="text-[11px] text-slate-400">Profit</div>
+              <div
+                className={`text-base font-mono font-semibold ${
+                  profitB < 0 ? 'text-rose-400' : 'text-slate-100'
                 }`}
               >
-                {formatProfit(profitB)}
-              </span>
+                {formatCurrency(profitB)}
+              </div>
             </div>
 
-            <div className="flex items-baseline justify-between text-xs">
-              <span className="text-slate-400">Demand (D):</span>
-              <span className="font-mono font-semibold text-slate-200">
-                {Math.round(demandB).toLocaleString()}{' '}
-                <span className="text-slate-400 font-normal">({shareBPct}%)</span>
-              </span>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>
+                <div className="text-[11px] text-slate-400">Demand</div>
+                <div className="font-mono font-medium text-slate-200">
+                  {Math.round(demandB).toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] text-slate-400">Market share</div>
+                <div className="font-mono font-medium text-slate-200">{shareBPct}%</div>
+              </div>
             </div>
 
-            <div className="flex items-baseline justify-between text-xs">
-              <span className="text-slate-400">Margin / Unit:</span>
-              <span className="font-mono text-slate-300">
-                {`$${strategyB.price - 100}`}
-              </span>
+            <div>
+              <div className="text-[11px] text-slate-400">Margin</div>
+              <div className="text-xs font-mono text-slate-300">
+                {`₹${marginB}`}{' '}
+                <span className="text-[10px] text-slate-500">/ unit</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       {/* Market Share Division Bar */}
-      <div className="flex flex-col gap-1.5 pt-1">
-        <div className="flex items-center justify-between text-[11px] font-medium text-slate-400">
-          <span className="flex items-center gap-1 text-cyan-400">
-            <PieChart className="w-3 h-3" />
-            Share A: {shareAPct}%
+      <div className="pt-2 border-t border-slate-800/60 flex flex-col gap-1.5">
+        <div className="flex items-center justify-between text-[11px] text-slate-400">
+          <span>Market share</span>
+          <span className="font-mono">
+            <span className="text-sky-400">{shareAPct}%</span>
+            {' : '}
+            <span className="text-rose-400">{shareBPct}%</span>
           </span>
-          <span className="text-[10px] text-slate-400 font-mono">
-            D_A + D_B = {Math.round(demandA + demandB).toLocaleString()}
-          </span>
-          <span className="text-rose-400">Share B: {shareBPct}%</span>
         </div>
-
-        {/* Proportional Split Bar */}
-        <div className="h-3 w-full bg-slate-900 rounded-full overflow-hidden flex p-0.5 border border-slate-800 shadow-inner">
+        <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden flex">
           <div
-            className="h-full bg-cyan-500 rounded-l-full transition-all duration-300"
+            className="h-full bg-sky-500 transition-all duration-200"
             style={{ width: `${shareAPct}%` }}
             title={`Restaurant A: ${shareAPct}%`}
           />
           <div
-            className="h-full bg-rose-500 rounded-r-full transition-all duration-300"
+            className="h-full bg-rose-500 transition-all duration-200"
             style={{ width: `${shareBPct}%` }}
             title={`Restaurant B: ${shareBPct}%`}
           />
         </div>
       </div>
-    </div>
+    </section>
   );
 }

@@ -15,7 +15,7 @@ import { createDefaultCity } from '../game/city.js';
 import { evaluateProfile } from '../game/payoff.js';
 import { checkPureNashEquilibrium } from '../game/equilibrium.js';
 
-describe('Phase 3 — LOCUS Interactive UI Components', () => {
+describe('Phase 3.5 — LOCUS Refined UI Components', () => {
   const city = createDefaultCity();
   const strategyA = { location: { x: 2, y: 5 }, price: 250 };
   const strategyB = { location: { x: 7, y: 5 }, price: 250 };
@@ -33,7 +33,7 @@ describe('Phase 3 — LOCUS Interactive UI Components', () => {
     strategyB,
   });
 
-  it('renders CityMap with 100 customer zones and restaurant markers A and B', () => {
+  it('renders CityMap with customer zones and restaurant markers A and B', () => {
     const html = renderToString(
       <CityMap
         city={city}
@@ -45,12 +45,10 @@ describe('Phase 3 — LOCUS Interactive UI Components', () => {
       />
     );
 
-    expect(html).toContain('City Customer Grid (10 × 10)');
+    expect(html).toContain('City');
     expect(html).toContain('Restaurant A');
     expect(html).toContain('Restaurant B');
-    // Coordinates 2,5 and 7,5
-    expect(html).toContain('2,5');
-    expect(html).toContain('7,5');
+    expect(html).toContain('Selected:');
     // Markers
     expect(html).toContain('>A<');
     expect(html).toContain('>B<');
@@ -68,16 +66,17 @@ describe('Phase 3 — LOCUS Interactive UI Components', () => {
       />
     );
 
-    expect(html).toContain('Strategic Decision Controls');
-    expect(html).toContain('$150');
-    expect(html).toContain('$200');
-    expect(html).toContain('$250');
-    expect(html).toContain('$300');
-    expect(html).toContain('$350');
+    expect(html).toContain('Controls');
+    expect(html).toContain('Choose restaurant');
+    expect(html).toContain('₹150');
+    expect(html).toContain('₹200');
+    expect(html).toContain('₹250');
+    expect(html).toContain('₹300');
+    expect(html).toContain('₹350');
     expect(html).toContain('Reset');
   });
 
-  it('renders PayoffPanel with live demands, profits, and market shares', () => {
+  it('renders PayoffPanel with live demands, profits, margins, and market shares', () => {
     const html = renderToString(
       <PayoffPanel
         evaluation={evaluation}
@@ -86,13 +85,13 @@ describe('Phase 3 — LOCUS Interactive UI Components', () => {
       />
     );
 
-    expect(html).toContain('Economic Telemetry &amp; Payoffs');
-    expect(html).toContain('Share A:');
-    expect(html).toContain('Share B:');
-    expect(html).toContain('Total Market:');
-    expect(html).toContain('Margin / Unit:');
-    // Margin for price 250 is 250 - 100 = 150
-    expect(html).toContain('$150');
+    expect(html).toContain('Payoffs');
+    expect(html).toContain('Market share');
+    expect(html).toContain('Demand');
+    expect(html).toContain('Profit');
+    expect(html).toContain('Margin');
+    // Margin for price 250 is 250 - 100 = 150 -> ₹150
+    expect(html).toContain('₹150');
   });
 
   it('renders EquilibriumPanel with real-time Nash equilibrium diagnostic', () => {
@@ -105,9 +104,9 @@ describe('Phase 3 — LOCUS Interactive UI Components', () => {
       />
     );
 
-    expect(html).toContain('Game Theory Diagnostics');
-    expect(html).toContain('Unilateral Deviation Analysis');
-    expect(html).toContain('Scan Full Space for Pure Nash Equilibria');
+    expect(html).toContain('Equilibrium');
+    expect(html).toContain('Unilateral deviation analysis');
+    expect(html).toContain('Search for pure Nash equilibria');
   });
 
   it('renders the complete App shell with header, branding, workspace, and telemetry', () => {
@@ -115,7 +114,8 @@ describe('Phase 3 — LOCUS Interactive UI Components', () => {
 
     expect(html).toContain('LOCUS');
     expect(html).toContain('Spatial Game Theory Laboratory');
-    expect(html).toContain('Grid: 10×10');
-    expect(html).toContain('Pop:');
+    expect(html).toContain('10 × 10 grid');
+    expect(html).toContain('customers');
+    expect(html).toContain('Model:');
   });
 });
