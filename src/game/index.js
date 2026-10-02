@@ -10,3 +10,4 @@ export * from './payoff.js';
 export * from './city.js';
 export * from './strategies.js';
 export * from './equilibrium.js';
+export * from './dynamics.js';

@@ -18,6 +18,7 @@ import { distance } from '../game/utility.js';
  * @param {Object} props.evaluation
  * @param {Object|null} [props.selectedEquilibrium] - Optional equilibrium to preview on the map (Phase 4A)
  * @param {Object|null} [props.selectedBestResponse] - Optional best-response target to preview on the map (Phase 4B)
+ * @param {Object|null} [props.selectedDynamicsState] - Optional historical dynamics profile to preview on the map (Phase 4C)
  */
 export default function CityMap({
   city,
@@ -28,6 +29,7 @@ export default function CityMap({
   evaluation,
   selectedEquilibrium = null,
   selectedBestResponse = null,
+  selectedDynamicsState = null,
 }) {
   const [hoveredCell, setHoveredCell] = useState(null);
 
@@ -68,6 +70,10 @@ export default function CityMap({
   // Phase 4B Best Response Target
   const brPlayer = selectedBestResponse?.player;
   const brLoc = selectedBestResponse?.strategy?.location;
+
+  // Phase 4C Dynamics Historical Targets
+  const dynLocA = selectedDynamicsState?.strategyA?.location;
+  const dynLocB = selectedDynamicsState?.strategyB?.location;
 
   const activeName = selectedRestaurant === 'A' ? 'Restaurant 1' : 'Restaurant 2';
   const activeColor = selectedRestaurant === 'A' ? 'text-sky-400' : 'text-rose-400';
@@ -148,13 +154,33 @@ export default function CityMap({
                 const isBrA = isBrTarget && brPlayer === 'A';
                 const isBrB = isBrTarget && brPlayer === 'B';
 
+                // Phase 4C Dynamics Historical Previews
+                const isDynA = Boolean(dynLocA && dynLocA.x === x && dynLocA.y === y);
+                const isDynB = Boolean(dynLocB && dynLocB.x === x && dynLocB.y === y);
+
+                // Do not render duplicate confusing marker if historical location equals current restaurant location
+                const showDynA = isDynA && !isA;
+                const showDynB = isDynB && !isB;
+                const showDynBoth = showDynA && showDynB;
+
                 // Normalized density ratio (0 to 1)
                 const popRatio =
                   maxPop > minPop ? (cell.population - minPop) / (maxPop - minPop) : 0.5;
 
                 // Market capture dot styling
                 let marketDot = null;
-                if (alloc && !isA && !isB && !isBoth && !isEqA && !isEqB && !isBrA && !isBrB) {
+                if (
+                  alloc &&
+                  !isA &&
+                  !isB &&
+                  !isBoth &&
+                  !isEqA &&
+                  !isEqB &&
+                  !isBrA &&
+                  !isBrB &&
+                  !showDynA &&
+                  !showDynB
+                ) {
                   if (alloc.choice === 'A') {
                     marketDot = 'bg-sky-400/60';
                   } else if (alloc.choice === 'B') {
@@ -181,11 +207,13 @@ export default function CityMap({
                       isBrA ? ', Restaurant 1 Best Response Target' : ''
                     }${isBrB ? ', Restaurant 2 Best Response Target' : ''}${
                       isEqA ? ', Equilibrium A target' : ''
-                    }${isEqB ? ', Equilibrium B target' : ''}`}
+                    }${isEqB ? ', Equilibrium B target' : ''}${
+                      showDynA ? `, Dynamics Step #${selectedDynamicsState?.iteration} D1 target` : ''
+                    }${showDynB ? `, Dynamics Step #${selectedDynamicsState?.iteration} D2 target` : ''}`}
                     className={`relative w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded border transition-colors flex items-center justify-center cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 ${
                       isCellHovered
                         ? 'border-slate-500 z-10'
-                        : isEqA || isEqB || isBrA || isBrB
+                        : isEqA || isEqB || isBrA || isBrB || showDynA || showDynB
                         ? 'border-slate-700'
                         : 'border-slate-800/60 hover:border-slate-700'
                     }`}
@@ -242,6 +270,14 @@ export default function CityMap({
                             B*
                           </div>
                         )}
+                        {showDynB && (
+                          <div
+                            className="w-4 h-4 sm:w-5 sm:h-5 rounded border border-dotted border-rose-400 bg-rose-950/70 text-rose-300 font-bold text-[9px] flex items-center justify-center"
+                            title={`Dynamics Step #${selectedDynamicsState?.iteration}: Restaurant 2 target (${x}, ${y})`}
+                          >
+                            D2
+                          </div>
+                        )}
                       </div>
                     ) : isB ? (
                       <div className="flex items-center gap-0.5">
@@ -268,6 +304,14 @@ export default function CityMap({
                             title={`Equilibrium #${selectedEquilibrium?.id}: Restaurant A target`}
                           >
                             A*
+                          </div>
+                        )}
+                        {showDynA && (
+                          <div
+                            className="w-4 h-4 sm:w-5 sm:h-5 rounded border border-dotted border-sky-400 bg-sky-950/70 text-sky-300 font-bold text-[9px] flex items-center justify-center"
+                            title={`Dynamics Step #${selectedDynamicsState?.iteration}: Restaurant 1 target (${x}, ${y})`}
+                          >
+                            D1
                           </div>
                         )}
                       </div>
@@ -313,6 +357,35 @@ export default function CityMap({
                         title={`Equilibrium #${selectedEquilibrium?.id}: Restaurant B target (${x}, ${y})`}
                       >
                         B*
+                      </div>
+                    ) : showDynBoth ? (
+                      <div className="flex items-center gap-0.5">
+                        <div
+                          className="w-4 h-4 sm:w-5 sm:h-5 rounded border border-dotted border-sky-400 bg-sky-950/70 text-sky-300 font-bold text-[9px] flex items-center justify-center"
+                          title={`Dynamics Step #${selectedDynamicsState?.iteration}: Restaurant 1 target (${x}, ${y})`}
+                        >
+                          D1
+                        </div>
+                        <div
+                          className="w-4 h-4 sm:w-5 sm:h-5 rounded border border-dotted border-rose-400 bg-rose-950/70 text-rose-300 font-bold text-[9px] flex items-center justify-center"
+                          title={`Dynamics Step #${selectedDynamicsState?.iteration}: Restaurant 2 target (${x}, ${y})`}
+                        >
+                          D2
+                        </div>
+                      </div>
+                    ) : showDynA ? (
+                      <div
+                        className="w-6 h-6 sm:w-7 sm:h-7 rounded border-2 border-dotted border-sky-400 bg-sky-950/70 text-sky-300 font-bold text-[10px] sm:text-xs flex items-center justify-center shadow-sm select-none"
+                        title={`Dynamics Step #${selectedDynamicsState?.iteration}: Restaurant 1 target at (${x}, ${y}) @ ₹${selectedDynamicsState?.strategyA?.price}`}
+                      >
+                        D1
+                      </div>
+                    ) : showDynB ? (
+                      <div
+                        className="w-6 h-6 sm:w-7 sm:h-7 rounded border-2 border-dotted border-rose-400 bg-rose-950/70 text-rose-300 font-bold text-[10px] sm:text-xs flex items-center justify-center shadow-sm select-none"
+                        title={`Dynamics Step #${selectedDynamicsState?.iteration}: Restaurant 2 target at (${x}, ${y}) @ ₹${selectedDynamicsState?.strategyB?.price}`}
+                      >
+                        D2
                       </div>
                     ) : (
                       marketDot && (
@@ -369,6 +442,16 @@ export default function CityMap({
                 [Eq #{selectedEquilibrium?.id} B* target]
               </span>
             )}
+            {dynLocA && hoveredCell.x === dynLocA.x && hoveredCell.y === dynLocA.y && (
+              <span className="text-sky-300 font-medium text-[11px]">
+                {`[Dynamics Step #${selectedDynamicsState?.iteration} D1 target: (${dynLocA.x}, ${dynLocA.y}) @ ₹${selectedDynamicsState?.strategyA?.price}]`}
+              </span>
+            )}
+            {dynLocB && hoveredCell.x === dynLocB.x && hoveredCell.y === dynLocB.y && (
+              <span className="text-rose-300 font-medium text-[11px]">
+                {`[Dynamics Step #${selectedDynamicsState?.iteration} D2 target: (${dynLocB.x}, ${dynLocB.y}) @ ₹${selectedDynamicsState?.strategyB?.price}]`}
+              </span>
+            )}
           </div>
         ) : selectedBestResponse && brLoc ? (
           <div className="text-slate-300 flex items-center gap-2 flex-wrap">
@@ -385,6 +468,14 @@ export default function CityMap({
             <span className="text-slate-600">·</span>
             <span className="font-mono text-rose-300">{`B*(${eqLocB?.x}, ${eqLocB?.y})`}</span>
             <span className="text-slate-500 text-[11px]">(Click any cell to relocate {activeName})</span>
+          </div>
+        ) : selectedDynamicsState ? (
+          <div className="text-slate-300 flex items-center gap-2 flex-wrap">
+            <span className="text-slate-400">{`Inspecting Dynamics Step #${selectedDynamicsState.iteration}:`}</span>
+            <span className="font-mono text-sky-300">{`D1(${dynLocA?.x}, ${dynLocA?.y})`}</span>
+            <span className="text-slate-600">·</span>
+            <span className="font-mono text-rose-300">{`D2(${dynLocB?.x}, ${dynLocB?.y})`}</span>
+            <span className="text-slate-500 text-[11px]">(Outlined ghost pins on map)</span>
           </div>
         ) : (
           <div className="text-slate-400">
@@ -423,6 +514,22 @@ export default function CityMap({
               <span className="flex items-center gap-1 text-rose-300">
                 <span className="w-2.5 h-2.5 rounded border border-dashed border-rose-400 bg-rose-950/50" />
                 <span>B* Eq.</span>
+              </span>
+            </>
+          )}
+          {selectedDynamicsState && (
+            <>
+              <span className="flex items-center gap-1 text-sky-300">
+                <span className="w-3.5 h-2.5 rounded border border-dotted border-sky-400 bg-sky-950/50 flex items-center justify-center text-[7px] font-bold">
+                  D1
+                </span>
+                <span>{`D1 Step ${selectedDynamicsState.iteration}`}</span>
+              </span>
+              <span className="flex items-center gap-1 text-rose-300">
+                <span className="w-3.5 h-2.5 rounded border border-dotted border-rose-400 bg-rose-950/50 flex items-center justify-center text-[7px] font-bold">
+                  D2
+                </span>
+                <span>{`D2 Step ${selectedDynamicsState.iteration}`}</span>
               </span>
             </>
           )}

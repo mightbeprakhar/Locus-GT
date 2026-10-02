@@ -12,6 +12,7 @@ import GameControls from './GameControls.jsx';
 import PayoffPanel from './PayoffPanel.jsx';
 import EquilibriumPanel from './EquilibriumPanel.jsx';
 import BestResponsePanel from './BestResponsePanel.jsx';
+import DynamicsPanel from './DynamicsPanel.jsx';
 import { createDefaultCity } from '../game/city.js';
 import { evaluateProfile } from '../game/payoff.js';
 import {
@@ -19,6 +20,7 @@ import {
   findPureNashEquilibria,
   computeBestResponseAnalysis,
 } from '../game/equilibrium.js';
+import { runBestResponseDynamics } from '../game/dynamics.js';
 
 describe('LOCUS UI Components', () => {
   const city = createDefaultCity();
@@ -483,6 +485,325 @@ describe('LOCUS UI Components', () => {
 
       chooseTiedOption(1); // Choose option 2
       expect(chosenStrategy).toEqual(tiedStrategies[1].strategy);
+    });
+  });
+
+  // PHASE 4C — Best-Response Dynamics Component Tests
+  describe('Phase 4C — Best-Response Dynamics Component Integration', () => {
+    // Helper to find button elements in React JSX output
+    const findButtons = (element, acc = []) => {
+      if (!element || typeof element !== 'object') return acc;
+      if (element.type === 'button') acc.push(element);
+      if (Array.isArray(element.props?.children)) {
+        element.props.children.forEach((c) => findButtons(c, acc));
+      } else if (element.props?.children) {
+        findButtons(element.props.children, acc);
+      }
+      return acc;
+    };
+
+    it('DynamicsPanel empty state renders', () => {
+      const html = renderToString(<DynamicsPanel result={null} />);
+
+      expect(html).toContain('Best-Response Dynamics');
+      expect(html).toContain('Sequential unilateral adjustments');
+      expect(html).toContain('Run the dynamics to observe strategic adjustment.');
+      expect(html).toContain('Run Dynamics');
+      expect(html).toContain('Step Once');
+      expect(html).toContain('Reset Dynamics');
+    });
+
+    it('DynamicsPanel renders converged result', () => {
+      const mockConvergedResult = {
+        status: 'converged',
+        iterationCount: 11,
+        converged: true,
+        cycleDetected: false,
+        cycleStartIndex: null,
+        cycleLength: null,
+        message: 'Best-response dynamics converged to a pure-strategy Nash equilibrium at iteration 11.',
+        history: [
+          {
+            iteration: 0,
+            actingPlayer: null,
+            strategyA: { location: { x: 2, y: 5 }, price: 250 },
+            strategyB: { location: { x: 7, y: 5 }, price: 250 },
+            payoffA: 700000,
+            payoffB: 700000,
+            isNash: false,
+            deviationOccurred: false,
+          },
+          {
+            iteration: 11,
+            actingPlayer: 'A',
+            strategyA: { location: { x: 4, y: 4 }, price: 150 },
+            strategyB: { location: { x: 4, y: 4 }, price: 150 },
+            payoffA: 500000,
+            payoffB: 500000,
+            isNash: true,
+            deviationOccurred: true,
+          },
+        ],
+      };
+
+      const html = renderToString(<DynamicsPanel result={mockConvergedResult} />);
+
+      expect(html).toContain('Converged to Nash equilibrium');
+      expect(html).toContain('11 iterations');
+      expect(html).toContain('Final status:');
+      expect(html).toContain('converged');
+    });
+
+    it('DynamicsPanel renders cycle result', () => {
+      const mockCycleResult = {
+        status: 'cycle',
+        iterationCount: 4,
+        converged: false,
+        cycleDetected: true,
+        cycleLength: 4,
+        cycleStartIndex: 0,
+        message: 'Best-response dynamics entered a cycle of period 4 starting at iteration 0.',
+        history: [
+          {
+            iteration: 0,
+            actingPlayer: null,
+            strategyA: { location: { x: 0, y: 0 }, price: 150 },
+            strategyB: { location: { x: 0, y: 0 }, price: 200 },
+            payoffA: 50000,
+            payoffB: 40000,
+            isNash: false,
+            deviationOccurred: false,
+          },
+        ],
+      };
+
+      const html = renderToString(<DynamicsPanel result={mockCycleResult} />);
+
+      expect(html).toContain('Cycle detected');
+      expect(html).toContain('4 iterations');
+      expect(html).toContain('Final status:');
+      expect(html).toContain('cycle');
+      expect(html).not.toContain('no Nash equilibrium');
+    });
+
+    it('DynamicsPanel renders max-iterations result', () => {
+      const mockMaxResult = {
+        status: 'max-iterations',
+        iterationCount: 25,
+        converged: false,
+        cycleDetected: false,
+        cycleStartIndex: null,
+        cycleLength: null,
+        message: 'Best-response dynamics reached the maximum iteration limit (25).',
+        history: [
+          {
+            iteration: 0,
+            actingPlayer: null,
+            strategyA: { location: { x: 2, y: 5 }, price: 250 },
+            strategyB: { location: { x: 7, y: 5 }, price: 250 },
+            payoffA: 700000,
+            payoffB: 700000,
+            isNash: false,
+            deviationOccurred: false,
+          },
+        ],
+      };
+
+      const html = renderToString(<DynamicsPanel result={mockMaxResult} />);
+
+      expect(html).toContain('Maximum iterations reached');
+      expect(html).toContain('25 iterations');
+      expect(html).toContain('Final status:');
+      expect(html).toContain('max-iterations');
+      expect(html).not.toContain('no Nash equilibrium');
+    });
+
+    it('trajectory rows render with step, firms, profits, and statuses', () => {
+      const dynamicsRun = runBestResponseDynamics({
+        city,
+        strategyA,
+        strategyB,
+        maxIterations: 3,
+      });
+
+      const html = renderToString(<DynamicsPanel result={dynamicsRun} />);
+
+      expect(html).toContain('Trajectory (4 steps)');
+      expect(html).toContain('Step');
+      expect(html).toContain('Acting Firm');
+      expect(html).toContain('Profit 1');
+      expect(html).toContain('Profit 2');
+      expect(html).toContain('0 (Initial)');
+      expect(html).toContain('(2, 5) · ₹250');
+      expect(html).toContain('(7, 5) · ₹250');
+    });
+
+    it('selected trajectory state renders inspector with full metrics', () => {
+      const selectedState = {
+        iteration: 2,
+        actingPlayer: 'B',
+        strategyA: { location: { x: 6, y: 5 }, price: 250 },
+        strategyB: { location: { x: 5, y: 5 }, price: 200 },
+        payoffA: 950000,
+        payoffB: 880000,
+        demandA: 6333,
+        demandB: 5866,
+        marketShareA: 0.519,
+        marketShareB: 0.481,
+        isNash: false,
+        deviationOccurred: true,
+      };
+
+      const mockResult = {
+        status: 'stepping',
+        iterationCount: 2,
+        history: [selectedState],
+      };
+
+      const html = renderToString(
+        <DynamicsPanel result={mockResult} selectedState={selectedState} />
+      );
+
+      expect(html).toContain('Selected Step');
+      expect(html).toContain('#2');
+      expect(html).toContain('Restaurant 2 (Firm B)');
+      expect(html).toContain('Strategy changed');
+      expect(html).toContain('Not Nash');
+      expect(html).toContain('(6, 5)');
+      expect(html).toContain('(5, 5)');
+      expect(html).toContain('₹250');
+      expect(html).toContain('₹200');
+      expect(html).toContain('51.9%');
+      expect(html).toContain('48.1%');
+      expect(html).toContain('Load into Simulation');
+    });
+
+    it('"Load into Simulation" callback fires when button is clicked', () => {
+      const selectedState = {
+        iteration: 1,
+        actingPlayer: 'A',
+        strategyA: { location: { x: 6, y: 5 }, price: 250 },
+        strategyB: { location: { x: 7, y: 5 }, price: 250 },
+        payoffA: 1516800,
+        payoffB: 700000,
+      };
+
+      let loaded = null;
+      const element = DynamicsPanel({
+        result: { status: 'stepping', iterationCount: 1, history: [selectedState] },
+        selectedState,
+        onLoadState: (state) => {
+          loaded = state;
+        },
+      });
+
+      const buttons = findButtons(element);
+      const loadBtn = buttons.find((b) => renderToString(b).includes('Load into Simulation'));
+      expect(loadBtn).toBeDefined();
+
+      loadBtn.props.onClick();
+      expect(loaded).toEqual(selectedState);
+    });
+
+    it('starting-player selector callback fires with selected player', () => {
+      let selectedPlayer = null;
+      const element = DynamicsPanel({
+        startingPlayer: 'A',
+        onStartingPlayerChange: (p) => {
+          selectedPlayer = p;
+        },
+      });
+
+      const buttons = findButtons(element);
+      const btnB = buttons.find((b) => renderToString(b).includes('Restaurant 2 (Firm B)'));
+      expect(btnB).toBeDefined();
+
+      btnB.props.onClick();
+      expect(selectedPlayer).toBe('B');
+    });
+
+    it('max-iteration selector callback fires with selected iteration count', () => {
+      let chosenLimit = null;
+      const element = DynamicsPanel({
+        maxIterations: 25,
+        onMaxIterationsChange: (l) => {
+          chosenLimit = l;
+        },
+      });
+
+      const buttons = findButtons(element);
+      const btn50 = buttons.find((b) => renderToString(b).includes('>50<'));
+      expect(btn50).toBeDefined();
+
+      btn50.props.onClick();
+      expect(chosenLimit).toBe(50);
+    });
+
+    it('CityMap renders dynamics historical preview with D1 and D2 markers', () => {
+      const dynState = {
+        iteration: 2,
+        strategyA: { location: { x: 3, y: 4 }, price: 200 },
+        strategyB: { location: { x: 8, y: 8 }, price: 300 },
+      };
+
+      const html = renderToString(
+        <CityMap
+          city={city}
+          strategyA={strategyA}
+          strategyB={strategyB}
+          selectedRestaurant="A"
+          onSelectLocation={() => {}}
+          evaluation={evaluation}
+          selectedDynamicsState={dynState}
+        />
+      );
+
+      expect(html).toContain('>D1<');
+      expect(html).toContain('>D2<');
+      expect(html).toContain('Inspecting Dynamics Step #2:');
+      expect(html).toContain('D1(3, 4)');
+      expect(html).toContain('D2(8, 8)');
+      expect(html).toContain('D1 Step 2');
+      expect(html).toContain('D2 Step 2');
+    });
+
+    it('dynamics preview remains separate and avoids duplicate marker when matching current location', () => {
+      // Firm A historical location matches current strategyA (2, 5)
+      // Firm B historical location is separate (8, 8) vs current (7, 5)
+      const matchingDynState = {
+        iteration: 1,
+        strategyA: { location: { x: 2, y: 5 }, price: 250 },
+        strategyB: { location: { x: 8, y: 8 }, price: 250 },
+      };
+
+      const html = renderToString(
+        <CityMap
+          city={city}
+          strategyA={strategyA}
+          strategyB={strategyB}
+          selectedRestaurant="A"
+          onSelectLocation={() => {}}
+          evaluation={evaluation}
+          selectedDynamicsState={matchingDynState}
+        />
+      );
+
+      // Marker 1 remains authoritative at (2, 5); no duplicate D1 target marker is rendered on grid cells
+      expect(html).toContain('>1<');
+      expect(html).not.toContain('Dynamics Step #1 D1 target');
+
+      // Separate D2 marker IS rendered on grid at (8, 8)
+      expect(html).toContain('Dynamics Step #1 D2 target');
+      expect(html).toContain('D2 Step 1');
+    });
+
+    it('App renders DynamicsPanel within the analytical sidebar', () => {
+      const html = renderToString(<App />);
+
+      expect(html).toContain('Best-Response Dynamics');
+      expect(html).toContain('Sequential unilateral adjustments');
+      expect(html).toContain('Cournot process');
+      expect(html).toContain('Run the dynamics to observe strategic adjustment.');
     });
   });
 });

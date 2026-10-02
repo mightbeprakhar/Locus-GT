@@ -10,9 +10,15 @@ import GameControls from './components/GameControls.jsx';
 import PayoffPanel from './components/PayoffPanel.jsx';
 import BestResponsePanel from './components/BestResponsePanel.jsx';
 import EquilibriumPanel from './components/EquilibriumPanel.jsx';
+import DynamicsPanel from './components/DynamicsPanel.jsx';
 import { createDefaultCity } from './game/city.js';
 import { evaluateProfile } from './game/payoff.js';
 import { checkPureNashEquilibrium, computeBestResponseAnalysis } from './game/equilibrium.js';
+import {
+  runBestResponseDynamics,
+  stepBestResponseDynamics,
+  createStrategyProfileKey,
+} from './game/dynamics.js';
 
 // Baseline strategy profile
 const INITIAL_STRATEGY_A = Object.freeze({
@@ -41,6 +47,13 @@ export default function App() {
 
   // Currently inspected Best Response target (Phase 4B Analysis)
   const [selectedBestResponse, setSelectedBestResponse] = useState(null);
+
+  // Phase 4C: Best-Response Dynamics state
+  const [dynamicsResult, setDynamicsResult] = useState(null);
+  const [selectedDynamicsState, setSelectedDynamicsState] = useState(null);
+  const [dynamicsStartingPlayer, setDynamicsStartingPlayer] = useState('A');
+  const [dynamicsMaxIterations, setDynamicsMaxIterations] = useState(25);
+  const [dynamicsStepState, setDynamicsStepState] = useState(null);
 
   // Profile evaluation (allocations included for market visualization)
   const evaluation = useMemo(() => {
@@ -112,6 +125,29 @@ export default function App() {
       setStrategyB(strategy);
     }
     setSelectedBestResponse(null);
+    setSelectedEquilibrium(null);
+    setSelectedDynamicsState(null);
+  }, []);
+
+  // Select an equilibrium to inspect on map
+  const handleSelectEquilibrium = useCallback((eq) => {
+    setSelectedEquilibrium(eq);
+    setSelectedBestResponse(null);
+    setSelectedDynamicsState(null);
+  }, []);
+
+  // Select a best response to inspect on map
+  const handleSelectBestResponse = useCallback((br) => {
+    setSelectedBestResponse(br);
+    setSelectedEquilibrium(null);
+    setSelectedDynamicsState(null);
+  }, []);
+
+  // Select a dynamics trajectory state to inspect on map
+  const handleSelectDynamicsState = useCallback((state) => {
+    setSelectedDynamicsState(state);
+    setSelectedEquilibrium(null);
+    setSelectedBestResponse(null);
   }, []);
 
   // Load a discovered Nash equilibrium profile directly into simulation
@@ -120,6 +156,266 @@ export default function App() {
     setStrategyA(equilibrium.strategyA);
     setStrategyB(equilibrium.strategyB);
     setSelectedBestResponse(null);
+    setSelectedEquilibrium(null);
+    setSelectedDynamicsState(null);
+  }, []);
+
+  // Load a historical trajectory state directly into simulation
+  const handleLoadDynamicsState = useCallback((state) => {
+    if (!state) return;
+    setStrategyA(state.strategyA);
+    setStrategyB(state.strategyB);
+    setSelectedDynamicsState(null);
+    setSelectedBestResponse(null);
+    setSelectedEquilibrium(null);
+  }, []);
+
+  // Run full best-response dynamics solver
+  const handleRunDynamics = useCallback(() => {
+    setSelectedEquilibrium(null);
+    setSelectedBestResponse(null);
+    const res = runBestResponseDynamics({
+      city,
+      strategyA,
+      strategyB,
+      startingPlayer: dynamicsStartingPlayer,
+      maxIterations: dynamicsMaxIterations,
+    });
+    setDynamicsResult(res);
+    setSelectedDynamicsState(res.finalState);
+    setDynamicsStepState({
+      strategyA: res.finalState.strategyA,
+      strategyB: res.finalState.strategyB,
+      nextActingPlayer: res.finalState.actingPlayer === 'A' ? 'B' : 'A',
+    });
+  }, [city, strategyA, strategyB, dynamicsStartingPlayer, dynamicsMaxIterations]);
+
+  // Execute a single unilateral best-response dynamic step
+  const handleStepDynamics = useCallback(() => {
+    setSelectedEquilibrium(null);
+    setSelectedBestResponse(null);
+
+    // Case 1: No dynamics result yet -> Start from current simulation profile
+    if (!dynamicsResult || dynamicsResult.history.length === 0) {
+      const initialEvaluation = evaluateProfile({ city, strategyA, strategyB });
+      const initialNashCheck = checkPureNashEquilibrium({ city, strategyA, strategyB });
+      const key0 = createStrategyProfileKey(strategyA, strategyB);
+
+      const state0 = {
+        iteration: 0,
+        actingPlayer: null,
+        strategyA: { ...strategyA, location: { ...strategyA.location } },
+        strategyB: { ...strategyB, location: { ...strategyB.location } },
+        payoffA: initialEvaluation.profitA,
+        payoffB: initialEvaluation.profitB,
+        demandA: initialEvaluation.demandA,
+        demandB: initialEvaluation.demandB,
+        marketShareA: initialEvaluation.marketShareA,
+        marketShareB: initialEvaluation.marketShareB,
+        isNash: initialNashCheck.isNash,
+        deviationOccurred: false,
+        tiedCount: 1,
+        stateKey: key0,
+      };
+
+      if (initialNashCheck.isNash) {
+        const res = {
+          status: 'converged',
+          history: [state0],
+          iterationCount: 0,
+          converged: true,
+          cycleDetected: false,
+          cycleStartIndex: null,
+          cycleLength: null,
+          finalState: state0,
+          message: 'Initial strategy profile is already a pure-strategy Nash equilibrium.',
+        };
+        setDynamicsResult(res);
+        setSelectedDynamicsState(state0);
+        setDynamicsStepState(null);
+        return;
+      }
+
+      const actingPlayer = dynamicsStartingPlayer;
+      const stepResult = stepBestResponseDynamics({
+        city,
+        strategyA,
+        strategyB,
+        actingPlayer,
+      });
+
+      const state1 = {
+        iteration: 1,
+        actingPlayer: stepResult.actingPlayer,
+        strategyA: stepResult.strategyA,
+        strategyB: stepResult.strategyB,
+        payoffA: stepResult.payoffA,
+        payoffB: stepResult.payoffB,
+        demandA: stepResult.demandA,
+        demandB: stepResult.demandB,
+        marketShareA: stepResult.marketShareA,
+        marketShareB: stepResult.marketShareB,
+        isNash: stepResult.isNash,
+        deviationOccurred: stepResult.deviationOccurred,
+        tiedCount: stepResult.tiedCount,
+        stateKey: stepResult.stateKey,
+      };
+
+      const newHistory = [state0, state1];
+      let status = 'stepping';
+      let converged = false;
+      let message = 'Step 1 complete.';
+
+      if (state1.isNash) {
+        status = 'converged';
+        converged = true;
+        message = 'Best-response dynamics converged to a pure-strategy Nash equilibrium at iteration 1.';
+      } else if (dynamicsMaxIterations <= 1) {
+        status = 'max-iterations';
+        message = `Best-response dynamics reached the maximum iteration limit (${dynamicsMaxIterations}).`;
+      }
+
+      const res = {
+        status,
+        history: newHistory,
+        iterationCount: 1,
+        converged,
+        cycleDetected: false,
+        cycleStartIndex: null,
+        cycleLength: null,
+        finalState: state1,
+        message,
+      };
+
+      setDynamicsResult(res);
+      setSelectedDynamicsState(state1);
+      setDynamicsStepState({
+        strategyA: stepResult.strategyA,
+        strategyB: stepResult.strategyB,
+        nextActingPlayer: stepResult.nextActingPlayer,
+      });
+      return;
+    }
+
+    // Case 2: dynamicsResult exists. Continue from selectedDynamicsState (or finalState)
+    const baseState = selectedDynamicsState ?? dynamicsResult.finalState;
+    if (baseState.isNash) {
+      return;
+    }
+
+    const actingPlayer =
+      dynamicsStepState &&
+      dynamicsStepState.strategyA === baseState.strategyA &&
+      dynamicsStepState.strategyB === baseState.strategyB
+        ? dynamicsStepState.nextActingPlayer
+        : baseState.iteration === 0
+        ? dynamicsStartingPlayer
+        : baseState.actingPlayer === 'A'
+        ? 'B'
+        : 'A';
+
+    const stepResult = stepBestResponseDynamics({
+      city,
+      strategyA: baseState.strategyA,
+      strategyB: baseState.strategyB,
+      actingPlayer,
+    });
+
+    const nextIteration = baseState.iteration + 1;
+    const nextState = {
+      iteration: nextIteration,
+      actingPlayer: stepResult.actingPlayer,
+      strategyA: stepResult.strategyA,
+      strategyB: stepResult.strategyB,
+      payoffA: stepResult.payoffA,
+      payoffB: stepResult.payoffB,
+      demandA: stepResult.demandA,
+      demandB: stepResult.demandB,
+      marketShareA: stepResult.marketShareA,
+      marketShareB: stepResult.marketShareB,
+      isNash: stepResult.isNash,
+      deviationOccurred: stepResult.deviationOccurred,
+      tiedCount: stepResult.tiedCount,
+      stateKey: stepResult.stateKey,
+    };
+
+    const baseIndex = dynamicsResult.history.findIndex(
+      (s) => s.iteration === baseState.iteration
+    );
+    const historyPrefix =
+      baseIndex >= 0
+        ? dynamicsResult.history.slice(0, baseIndex + 1)
+        : dynamicsResult.history;
+    const newHistory = [...historyPrefix, nextState];
+
+    // Cycle detection
+    let cycleDetected = false;
+    let cycleStartIndex = null;
+    let cycleLength = null;
+
+    for (let i = 0; i < newHistory.length - 1; i++) {
+      if (newHistory[i].stateKey === nextState.stateKey) {
+        const len = nextIteration - newHistory[i].iteration;
+        if (len >= 2) {
+          cycleDetected = true;
+          cycleStartIndex = newHistory[i].iteration;
+          cycleLength = len;
+          break;
+        }
+      }
+    }
+
+    let status = 'stepping';
+    let converged = false;
+    let message = `Step ${nextIteration} complete.`;
+
+    if (nextState.isNash) {
+      status = 'converged';
+      converged = true;
+      message = `Best-response dynamics converged to a pure-strategy Nash equilibrium at iteration ${nextIteration}.`;
+    } else if (cycleDetected) {
+      status = 'cycle';
+      message = `Best-response dynamics entered a cycle of period ${cycleLength} starting at iteration ${cycleStartIndex}.`;
+    } else if (nextIteration >= dynamicsMaxIterations) {
+      status = 'max-iterations';
+      message = `Best-response dynamics reached the maximum iteration limit (${dynamicsMaxIterations}).`;
+    }
+
+    const res = {
+      status,
+      history: newHistory,
+      iterationCount: nextIteration,
+      converged,
+      cycleDetected,
+      cycleStartIndex,
+      cycleLength,
+      finalState: nextState,
+      message,
+    };
+
+    setDynamicsResult(res);
+    setSelectedDynamicsState(nextState);
+    setDynamicsStepState({
+      strategyA: stepResult.strategyA,
+      strategyB: stepResult.strategyB,
+      nextActingPlayer: stepResult.nextActingPlayer,
+    });
+  }, [
+    city,
+    strategyA,
+    strategyB,
+    dynamicsResult,
+    selectedDynamicsState,
+    dynamicsStartingPlayer,
+    dynamicsMaxIterations,
+    dynamicsStepState,
+  ]);
+
+  // Reset dynamics only without affecting main simulation
+  const handleResetDynamics = useCallback(() => {
+    setDynamicsResult(null);
+    setSelectedDynamicsState(null);
+    setDynamicsStepState(null);
   }, []);
 
   // Reset simulation to baseline initial configuration
@@ -129,6 +425,9 @@ export default function App() {
     setSelectedRestaurant('A');
     setSelectedEquilibrium(null);
     setSelectedBestResponse(null);
+    setSelectedDynamicsState(null);
+    setDynamicsResult(null);
+    setDynamicsStepState(null);
   }, []);
 
   return (
@@ -185,6 +484,7 @@ export default function App() {
             evaluation={evaluation}
             selectedEquilibrium={selectedEquilibrium}
             selectedBestResponse={selectedBestResponse}
+            selectedDynamicsState={selectedDynamicsState}
           />
         </div>
 
@@ -210,8 +510,22 @@ export default function App() {
             strategyA={strategyA}
             strategyB={strategyB}
             selectedBestResponse={selectedBestResponse}
-            onSelectBestResponse={setSelectedBestResponse}
+            onSelectBestResponse={handleSelectBestResponse}
             onApplyBestResponse={handleApplyBestResponse}
+          />
+
+          <DynamicsPanel
+            result={dynamicsResult}
+            selectedState={selectedDynamicsState}
+            onSelectState={handleSelectDynamicsState}
+            onRun={handleRunDynamics}
+            onStep={handleStepDynamics}
+            onReset={handleResetDynamics}
+            startingPlayer={dynamicsStartingPlayer}
+            onStartingPlayerChange={setDynamicsStartingPlayer}
+            maxIterations={dynamicsMaxIterations}
+            onMaxIterationsChange={setDynamicsMaxIterations}
+            onLoadState={handleLoadDynamicsState}
           />
 
           <EquilibriumPanel
@@ -220,7 +534,7 @@ export default function App() {
             strategyA={strategyA}
             strategyB={strategyB}
             selectedEquilibrium={selectedEquilibrium}
-            onSelectEquilibrium={setSelectedEquilibrium}
+            onSelectEquilibrium={handleSelectEquilibrium}
             onLoadEquilibrium={handleLoadEquilibrium}
           />
         </div>
