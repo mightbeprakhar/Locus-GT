@@ -127,7 +127,7 @@ describe('LOCUS UI Components', () => {
   });
 
   it('renders the complete App shell with header, branding, workspace, and telemetry', () => {
-    const html = renderToString(<App />);
+    const html = renderToString(<App initialEntries={['/classic']} />);
 
     expect(html).toContain('LOCUS');
     expect(html).toContain('Spatial Game Theory Laboratory');
@@ -797,13 +797,119 @@ describe('LOCUS UI Components', () => {
       expect(html).toContain('D2 Step 1');
     });
 
-    it('App renders DynamicsPanel within the analytical sidebar', () => {
-      const html = renderToString(<App />);
+    it('App renders DynamicsPanel within the analytical sidebar on /classic', () => {
+      const html = renderToString(<App initialEntries={['/classic']} />);
 
       expect(html).toContain('Best-Response Dynamics');
       expect(html).toContain('Sequential unilateral adjustments');
-      expect(html).toContain('Cournot process');
+      expect(html).toContain('Sequential best-response adjustments');
       expect(html).toContain('Run the dynamics to observe strategic adjustment.');
+    });
+  });
+
+  // PHASE 5A — Application Shell & Navigation Component Tests
+  describe('Phase 5A — Application Shell & Navigation', () => {
+    it('renders Dashboard on root route (/) with overview and module cards', () => {
+      const html = renderToString(<App initialEntries={['/']} />);
+
+      expect(html).toContain('LOCUS');
+      expect(html).toContain('GT Lab');
+      expect(html).toContain('Spatial Game Theory Laboratory');
+      expect(html).toContain('Theoretical &amp; Spatial Competition Platform');
+      expect(html).toContain('Classic Lab');
+      expect(html).toContain('Frontier');
+      expect(html).toContain('Experiments');
+      expect(html).toContain('Active Module');
+      expect(html).toContain('Enter Classic Lab');
+    });
+
+    it('renders Classic Lab on /classic route with full simulation workspace', () => {
+      const html = renderToString(<App initialEntries={['/classic']} />);
+
+      expect(html).toContain('Classic Lab');
+      expect(html).toContain('Discrete Hotelling Spatial Competition &amp; Pure Nash Dynamics');
+      expect(html).toContain('10 × 10 grid');
+      expect(html).toContain('City');
+      expect(html).toContain('Controls');
+      expect(html).toContain('Payoffs');
+      expect(html).toContain('Best Response Analysis');
+      expect(html).toContain('Best-Response Dynamics');
+      expect(html).toContain('Equilibrium');
+    });
+
+    it('renders Frontier placeholder on /frontier route with roadmap extensions', () => {
+      const html = renderToString(<App initialEntries={['/frontier']} />);
+
+      expect(html).toContain('Frontier: Real-World Competition Laboratory');
+      expect(html).toContain('Roadmap Module · Phase 5+');
+      expect(html).toContain('Extend spatial competition beyond the controlled model.');
+      expect(html).toContain('Road Networks &amp; Traffic Topologies');
+      expect(html).toContain('Natural &amp; Physical Barriers');
+      expect(html).toContain('Open Classic Lab');
+    });
+
+    it('renders Experiments placeholder on /experiments route with planned suites', () => {
+      const html = renderToString(<App initialEntries={['/experiments']} />);
+
+      expect(html).toContain('Controlled Strategic Experiments');
+      expect(html).toContain('Roadmap Module · Phase 5+');
+      expect(html).toContain('Controlled experiments comparing strategic environments.');
+      expect(html).toContain('Sensitivity Analysis Over Travel Friction');
+      expect(html).toContain('Convergence Basin Mapping');
+      expect(html).toContain('Open Classic Lab');
+    });
+
+    it('renders Insights placeholder on /insights route with welfare topics', () => {
+      const html = renderToString(<App initialEntries={['/insights']} />);
+
+      expect(html).toContain('Market Insights &amp; Welfare Analysis');
+      expect(html).toContain('Roadmap Module · Phase 5+');
+      expect(html).toContain('Explore equilibrium, market, welfare and strategic outcomes.');
+      expect(html).toContain('Minimum vs. Maximum Differentiation');
+      expect(html).toContain('Consumer Surplus Distribution');
+      expect(html).toContain('Open Classic Lab');
+    });
+
+    it('renders About documentation on /about route with mathematical formulations', () => {
+      const html = renderToString(<App initialEntries={['/about']} />);
+
+      expect(html).toContain('About LOCUS &amp; The Mathematical Model');
+      expect(html).toContain('Documentation &amp; Theory');
+      expect(html).toContain('1. Consumer Utility &amp; Choice Rule');
+      expect(html).toContain('2. Demand Aggregation &amp; Profit Function');
+      expect(html).toContain('3. Strategic Space &amp; Pure Nash Equilibria');
+      expect(html).toContain('V = ₹500');
+      expect(html).toContain('α = 10');
+      expect(html).toContain('c = ₹100');
+      expect(html).toContain('F = ₹0');
+      expect(html).toContain('13,992 consumers');
+      expect(html).toContain('250,000 joint profiles');
+      expect(html).toContain('32 pure-strategy Nash equilibria');
+      expect(html).toContain('Open Classic Lab');
+
+      // Verify no raw LaTeX dollar signs in prose
+      expect(html).not.toContain('$j$');
+      expect(html).not.toContain('$s_j$');
+    });
+
+    it('redirects unknown routes to Dashboard', () => {
+      const html = renderToString(<App initialEntries={['/unknown-route-123']} />);
+
+      // Should redirect to Dashboard
+      expect(html).toContain('Theoretical &amp; Spatial Competition Platform');
+      expect(html).toContain('Enter Classic Lab');
+    });
+
+    it('renders persistent sidebar navigation items with icons and links', () => {
+      const html = renderToString(<App initialEntries={['/']} />);
+
+      expect(html).toContain('Dashboard');
+      expect(html).toContain('Classic Lab');
+      expect(html).toContain('Frontier');
+      expect(html).toContain('Experiments');
+      expect(html).toContain('Insights');
+      expect(html).toContain('About');
+      expect(html).toContain('Hotelling Discrete Framework');
     });
   });
 });

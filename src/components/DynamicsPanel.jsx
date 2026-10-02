@@ -2,7 +2,7 @@
  * @file DynamicsPanel.jsx
  * @description Sequential Best-Response Dynamics analytical panel for LOCUS:
  * Spatial Game Theory Laboratory.
- * Allows users to run or step through Cournot-style best-response adjustment paths,
+ * Allows users to run or step through sequential best-response adjustment paths,
  * detect pure Nash convergence or cycles, inspect historical trajectories,
  * and load historical states into the simulation.
  */
@@ -83,7 +83,7 @@ export default function DynamicsPanel({
           </h2>
           <p className="text-xs text-slate-400">Sequential unilateral adjustments</p>
         </div>
-        <span className="text-[11px] font-mono text-slate-400">Cournot process</span>
+        <span className="text-[11px] font-mono text-slate-400">Sequential best-response adjustments</span>
       </div>
 
       {/* Brief explanation */}
