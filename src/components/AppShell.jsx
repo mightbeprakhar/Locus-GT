@@ -39,7 +39,7 @@ const NAV_ITEMS = [
     label: 'Frontier',
     icon: Compass,
     end: false,
-    badge: 'Roadmap',
+    badge: 'Active',
   },
   {
     to: '/experiments',

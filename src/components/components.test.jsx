@@ -13,7 +13,9 @@ import PayoffPanel from './PayoffPanel.jsx';
 import EquilibriumPanel from './EquilibriumPanel.jsx';
 import BestResponsePanel from './BestResponsePanel.jsx';
 import DynamicsPanel from './DynamicsPanel.jsx';
+import FrontierMap from './FrontierMap.jsx';
 import { createDefaultCity } from '../game/city.js';
+import { createFrontierCity, SCENARIO_IDS } from '../game/frontier/index.js';
 import { evaluateProfile } from '../game/payoff.js';
 import {
   checkPureNashEquilibrium,
@@ -837,15 +839,23 @@ describe('LOCUS UI Components', () => {
       expect(html).toContain('Equilibrium');
     });
 
-    it('renders Frontier placeholder on /frontier route with roadmap extensions', () => {
+    it('renders Frontier workspace on /frontier route with urban geography, presets, and map', () => {
       const html = renderToString(<App initialEntries={['/frontier']} />);
 
-      expect(html).toContain('Frontier: Real-World Competition Laboratory');
-      expect(html).toContain('Roadmap Module · Phase 5+');
+      expect(html).toContain('Frontier: Urban Geography &amp; Population');
+      expect(html).toContain('Urban Geography &amp; Population · Phase 6A');
       expect(html).toContain('Extend spatial competition beyond the controlled model.');
-      expect(html).toContain('Road Networks &amp; Traffic Topologies');
-      expect(html).toContain('Natural &amp; Physical Barriers');
-      expect(html).toContain('Open Classic Lab');
+      expect(html).toContain('Urban Scenario Presets');
+      expect(html).toContain('Balanced City');
+      expect(html).toContain('Urban Core');
+      expect(html).toContain('Retail Hub');
+      expect(html).toContain('Polycentric City');
+      expect(html).toContain('Urban Topography &amp; Population Heatmap');
+      expect(html).toContain('Urban Demographics &amp; Footfall');
+      expect(html).toContain('Effective Population');
+      expect(html).toContain('Populated Zones');
+      expect(html).toContain('Zone Inspector');
+      expect(html).toContain('Reset View');
     });
 
     it('renders Experiments placeholder on /experiments route with planned suites', () => {
@@ -912,4 +922,68 @@ describe('LOCUS UI Components', () => {
       expect(html).toContain('Hotelling Discrete Framework');
     });
   });
+
+  // PHASE 6A — Frontier: Urban Geography & Population Component Integration
+  describe('Phase 6A — Frontier: Urban Geography & Population UI', () => {
+    it('FrontierMap renders all 100 customer zones with coordinates and accessibility labels', () => {
+      const city = createFrontierCity({ scenario: SCENARIO_IDS.BALANCED });
+      const html = renderToString(
+        <FrontierMap city={city} selectedCell={null} onSelectCell={() => {}} />
+      );
+
+      expect(html).toContain('role="grid"');
+      expect(html).toContain('aria-label="Frontier urban spatial grid"');
+      expect(html).toContain('Zone (0, 0)');
+      expect(html).toContain('Zone (9, 9)');
+      expect(html).toContain('Zone (4, 5)');
+    });
+
+    it('FrontierMap renders anchor badges for Mall and Business District', () => {
+      const polycentric = createFrontierCity({ scenario: SCENARIO_IDS.POLYCENTRIC });
+      const html = renderToString(
+        <FrontierMap city={polycentric} selectedCell={null} onSelectCell={() => {}} />
+      );
+
+      // Business District badge at (2, 2)
+      expect(html).toContain('CBD');
+      expect(html).toContain('Business District: North Innovation District');
+
+      // Mall badge at (7, 7)
+      expect(html).toContain('Mall');
+      expect(html).toContain('Mall: South Bay Retail Complex');
+    });
+
+    it('Frontier workspace displays urban demographics, zoning, and anchor footfall breakdown', () => {
+      const html = renderToString(<App initialEntries={['/frontier']} />);
+
+      expect(html).toContain('Frontier: Urban Geography &amp; Population');
+      expect(html).toContain('Urban Demographics &amp; Footfall');
+      expect(html).toContain('Effective Population');
+      expect(html).toContain('Peak Density Zone');
+      expect(html).toContain('Average Density / Zone');
+      expect(html).toContain('Map Legend &amp; Classifications');
+      expect(html).toContain('Effective Customer Density');
+      expect(html).toContain('Urban Anchors');
+      expect(html).toContain('Zoning Types');
+    });
+
+    it('FrontierMap applies density tier styling using absolute thresholds without city-relative distortion', () => {
+      // Balanced City has populations 100..132 (all < 150).
+      // Under absolute thresholds, all cells are Low tier (bg-slate-900/60) and none should be Very High.
+      const balanced = createFrontierCity({ scenario: SCENARIO_IDS.BALANCED });
+      const balancedHtml = renderToString(
+        <FrontierMap city={balanced} selectedCell={null} onSelectCell={() => {}} />
+      );
+      expect(balancedHtml).not.toContain('bg-amber-950/50');
+
+      // Urban Core has peak at (4, 5) with 559 population (>= 380).
+      // Under absolute thresholds, (4, 5) must receive the Very High tier styling.
+      const urbanCore = createFrontierCity({ scenario: SCENARIO_IDS.URBAN_CORE });
+      const urbanCoreHtml = renderToString(
+        <FrontierMap city={urbanCore} selectedCell={null} onSelectCell={() => {}} />
+      );
+      expect(urbanCoreHtml).toContain('bg-amber-950/50');
+    });
+  });
 });
+
