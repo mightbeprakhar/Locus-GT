@@ -9,3 +9,4 @@ export * from './frontierCity.js';
 export * from './roadNetwork.js';
 export * from './shortestPath.js';
 export * from './travelCost.js';
+export * from './bottlenecks.js';

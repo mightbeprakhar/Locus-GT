@@ -14,6 +14,9 @@ export const ROAD_SCENARIO_IDS = Object.freeze({
   GRID: 'grid',
   ARTERIAL: 'arterial',
   RING_ARTERIAL: 'ring-arterial',
+  BARRIER: 'barrier',
+  BRIDGE: 'bridge',
+  BOTTLENECK: 'bottleneck',
 });
 
 /**
@@ -40,6 +43,27 @@ export const ROAD_SCENARIOS = Object.freeze({
     tagline: 'Perimeter bypass highway enclosing an urban street grid.',
     description:
       'An outer ring beltway along coordinate lines x,y in {2, 7} provides high-speed circumferential bypass routes (weight = 1) around local interior zones (weight = 2).',
+  }),
+  [ROAD_SCENARIO_IDS.BARRIER]: Object.freeze({
+    id: ROAD_SCENARIO_IDS.BARRIER,
+    name: 'River Barrier Network',
+    tagline: 'Natural dividing river barrier with a single controlled central crossing.',
+    description:
+      'A vertical river barrier along the midline between columns 4 and 5 blocks all east-west street connections except for a single preserved crossing at row 4, forcing significant geographical detours for cross-city travel.',
+  }),
+  [ROAD_SCENARIO_IDS.BRIDGE]: Object.freeze({
+    id: ROAD_SCENARIO_IDS.BRIDGE,
+    name: 'Dual-Region Bridge Network',
+    tagline: 'Two distinct urban regions separated by a water barrier, connected via explicit bridge spans.',
+    description:
+      'A horizontal canal barrier along row boundary y in {4, 5} completely bisects the northern and southern urban sectors. Dual designated bridge links at columns x = 2 and x = 7 provide the sole traversable connections between the regions.',
+  }),
+  [ROAD_SCENARIO_IDS.BOTTLENECK]: Object.freeze({
+    id: ROAD_SCENARIO_IDS.BOTTLENECK,
+    name: 'Bottleneck Corridor Network',
+    tagline: 'Urban topography channeling cross-city flows through designated bottleneck passes.',
+    description:
+      'Topographical barriers channel north-south transit flows into a designated central bottleneck corridor between rows 4 and 5 at columns 4 and 5, creating high structural traffic concentration.',
   }),
 });
 
@@ -119,9 +143,10 @@ export function createNode(x, y) {
  * @param {string} from - Source node id "x,y"
  * @param {string} to - Destination node id "x,y"
  * @param {number} weight - Positive travel friction / cost (> 0)
- * @returns {Readonly<{ from: string, to: string, weight: number }>}
+ * @param {Object} [metadata] - Optional edge metadata (isBridge, isBottleneck, name)
+ * @returns {Readonly<{ from: string, to: string, weight: number, isBridge?: boolean, isBottleneck?: boolean, name?: string }>}
  */
-export function createEdge(from, to, weight) {
+export function createEdge(from, to, weight, metadata = {}) {
   if (typeof from !== 'string' || typeof to !== 'string') {
     throw new TypeError('Edge "from" and "to" must be strings.');
   }
@@ -132,11 +157,16 @@ export function createEdge(from, to, weight) {
     throw new RangeError(`Edge weight must be a positive finite number, received ${weight}.`);
   }
 
-  return Object.freeze({
+  const edge = {
     from,
     to,
     weight,
-  });
+    ...(metadata.isBridge ? { isBridge: true } : {}),
+    ...(metadata.isBottleneck ? { isBottleneck: true } : {}),
+    ...(metadata.name ? { name: metadata.name } : {}),
+  };
+
+  return Object.freeze(edge);
 }
 
 /**
@@ -215,6 +245,84 @@ export function validateRoadNetwork(network) {
       );
     }
   }
+
+  if (network.blockedEdges && !Array.isArray(network.blockedEdges)) {
+    throw new TypeError('Network blockedEdges must be an array.');
+  }
+  if (network.bridges && !Array.isArray(network.bridges)) {
+    throw new TypeError('Network bridges must be an array.');
+  }
+  if (network.bottlenecks && !Array.isArray(network.bottlenecks)) {
+    throw new TypeError('Network bottlenecks must be an array.');
+  }
+
+  if (network.blockedSet && typeof network.blockedSet.has !== 'function') {
+    throw new TypeError('Network blockedSet must have a has() method.');
+  }
+  if (network.bridgeSet && typeof network.bridgeSet.has !== 'function') {
+    throw new TypeError('Network bridgeSet must have a has() method.');
+  }
+  if (network.bottleneckSet && typeof network.bottleneckSet.has !== 'function') {
+    throw new TypeError('Network bottleneckSet must have a has() method.');
+  }
+}
+
+/**
+ * Creates an immutable, read-only Set wrapper around an iterable or Set.
+ * Mutation methods (add, delete, clear) throw a TypeError.
+ * Read operations (has, size, values, keys, entries, forEach, iterator) delegate in O(1) time.
+ *
+ * @template T
+ * @param {Iterable<T>} [iterable]
+ * @returns {Readonly<{
+ *   has: (value: T) => boolean,
+ *   readonly size: number,
+ *   add: () => never,
+ *   delete: () => never,
+ *   clear: () => never,
+ *   values: () => IterableIterator<T>,
+ *   keys: () => IterableIterator<T>,
+ *   entries: () => IterableIterator<[T, T]>,
+ *   forEach: (callbackfn: (value: T, value2: T, set: any) => void, thisArg?: any) => void,
+ *   [Symbol.iterator]: () => IterableIterator<T>
+ * }>}
+ */
+export function createReadOnlySet(iterable) {
+  const innerSet = new Set(iterable);
+
+  return Object.freeze({
+    has(value) {
+      return innerSet.has(value);
+    },
+    get size() {
+      return innerSet.size;
+    },
+    add() {
+      throw new TypeError('Cannot mutate a read-only Set: add() is not allowed.');
+    },
+    delete() {
+      throw new TypeError('Cannot mutate a read-only Set: delete() is not allowed.');
+    },
+    clear() {
+      throw new TypeError('Cannot mutate a read-only Set: clear() is not allowed.');
+    },
+    values() {
+      return innerSet.values();
+    },
+    keys() {
+      return innerSet.keys();
+    },
+    entries() {
+      return innerSet.entries();
+    },
+    forEach(callback, thisArg) {
+      return innerSet.forEach((val, val2) => callback.call(thisArg, val, val2, this));
+    },
+    [Symbol.iterator]() {
+      return innerSet[Symbol.iterator]();
+    },
+    [Symbol.toStringTag]: 'Set',
+  });
 }
 
 /**
@@ -262,12 +370,100 @@ function getScenarioEdgeWeight(x1, y1, x2, y2, scenarioId) {
 }
 
 /**
+ * Evaluates the topological status of a link between two adjacent nodes.
+ *
+ * @param {number} x1
+ * @param {number} y1
+ * @param {number} x2
+ * @param {number} y2
+ * @param {string} scenarioId
+ * @returns {{
+ *   blocked: boolean,
+ *   reason?: string,
+ *   weight?: number,
+ *   isBridge?: boolean,
+ *   isBottleneck?: boolean,
+ *   name?: string
+ * }}
+ */
+function getScenarioLinkInfo(x1, y1, x2, y2, scenarioId) {
+  switch (scenarioId) {
+    case ROAD_SCENARIO_IDS.BARRIER: {
+      // River barrier along vertical boundary between columns 4 and 5
+      // Blocks horizontal links between col 4 and col 5, EXCEPT row 4 crossing
+      const isHorizontalMidline =
+        (x1 === 4 && x2 === 5 && y1 === y2) || (x1 === 5 && x2 === 4 && y1 === y2);
+      if (isHorizontalMidline) {
+        if (y1 === 4) {
+          // Controlled central crossing at row 4
+          return { blocked: false, weight: 1.0 };
+        }
+        return { blocked: true, reason: 'river_barrier' };
+      }
+      return { blocked: false, weight: 1.0 };
+    }
+
+    case ROAD_SCENARIO_IDS.BRIDGE: {
+      // Water barrier along horizontal boundary between rows 4 and 5
+      // Blocks vertical links between row 4 and row 5, EXCEPT bridges at cols 2 and 7
+      const isVerticalMidline =
+        (y1 === 4 && y2 === 5 && x1 === x2) || (y1 === 5 && y2 === 4 && x1 === x2);
+      if (isVerticalMidline) {
+        if (x1 === 2) {
+          return { blocked: false, weight: 1.0, isBridge: true, name: 'West Bridge' };
+        }
+        if (x1 === 7) {
+          return { blocked: false, weight: 1.0, isBridge: true, name: 'East Bridge' };
+        }
+        return { blocked: true, reason: 'canal_barrier' };
+      }
+      return { blocked: false, weight: 1.0 };
+    }
+
+    case ROAD_SCENARIO_IDS.BOTTLENECK: {
+      // Topographical pass channeling north-south traffic through central corridor
+      // Blocks vertical links between row 4 and row 5, EXCEPT bottleneck passes at cols 4 and 5
+      const isVerticalMidline =
+        (y1 === 4 && y2 === 5 && x1 === x2) || (y1 === 5 && y2 === 4 && x1 === x2);
+      if (isVerticalMidline) {
+        if (x1 === 4) {
+          return {
+            blocked: false,
+            weight: 1.0,
+            isBottleneck: true,
+            name: 'Central Bottleneck Corridor West',
+          };
+        }
+        if (x1 === 5) {
+          return {
+            blocked: false,
+            weight: 1.0,
+            isBottleneck: true,
+            name: 'Central Bottleneck Corridor East',
+          };
+        }
+        return { blocked: true, reason: 'flanking_barrier' };
+      }
+      return { blocked: false, weight: 1.0 };
+    }
+
+    case ROAD_SCENARIO_IDS.ARTERIAL:
+    case ROAD_SCENARIO_IDS.RING_ARTERIAL:
+    case ROAD_SCENARIO_IDS.GRID:
+    default: {
+      const weight = getScenarioEdgeWeight(x1, y1, x2, y2, scenarioId);
+      return { blocked: false, weight };
+    }
+  }
+}
+
+/**
  * Creates a deterministic road network graph for a given scenario.
  *
  * @param {Object} [options]
  * @param {number} [options.width=DEFAULT_GRID.width] - Number of columns (default 10)
  * @param {number} [options.height=DEFAULT_GRID.height] - Number of rows (default 10)
- * @param {'grid'|'arterial'|'ring-arterial'} [options.scenario=ROAD_SCENARIO_IDS.GRID]
+ * @param {'grid'|'arterial'|'ring-arterial'|'barrier'|'bridge'|'bottleneck'} [options.scenario=ROAD_SCENARIO_IDS.GRID]
  * @returns {Readonly<{
  *   width: number,
  *   height: number,
@@ -276,9 +472,15 @@ function getScenarioEdgeWeight(x1, y1, x2, y2, scenarioId) {
  *   scenarioDescription: string,
  *   nodes: Array<{ id: string, x: number, y: number }>,
  *   nodeMap: Map<string, { id: string, x: number, y: number }>,
- *   edges: Array<{ from: string, to: string, weight: number }>,
- *   adjacency: Map<string, Array<{ to: string, weight: number, x: number, y: number }>>,
- *   edgeMap: Map<string, number>
+ *   edges: Array<{ from: string, to: string, weight: number, isBridge?: boolean, isBottleneck?: boolean, name?: string }>,
+ *   adjacency: Map<string, Array<{ to: string, weight: number, x: number, y: number, isBridge?: boolean, isBottleneck?: boolean }>>,
+ *   edgeMap: Map<string, number>,
+ *   blockedEdges: Array<{ from: string, to: string, reason?: string }>,
+ *   bridges: Array<{ from: string, to: string, weight: number, isBridge: boolean, name?: string }>,
+ *   bottlenecks: Array<{ from: string, to: string, weight: number, isBottleneck: boolean, name?: string }>,
+ *   blockedSet: Set<string>,
+ *   bridgeSet: Set<string>,
+ *   bottleneckSet: Set<string>
  * }>}
  */
 export function createRoadNetwork({
@@ -306,6 +508,13 @@ export function createRoadNetwork({
   const edgeMap = new Map();
   const edges = [];
 
+  const blockedEdges = [];
+  const bridges = [];
+  const bottlenecks = [];
+  const blockedSet = new Set();
+  const bridgeSet = new Set();
+  const bottleneckSet = new Set();
+
   // 1. Generate nodes for 10x10 spatial grid
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -316,65 +525,76 @@ export function createRoadNetwork({
     }
   }
 
+  // Link processor for adjacent grid links
+  const processLink = (x1, y1, x2, y2) => {
+    const fromId = createNodeId(x1, y1);
+    const toId = createNodeId(x2, y2);
+    const linkInfo = getScenarioLinkInfo(x1, y1, x2, y2, scenarioMeta.id);
+
+    if (linkInfo.blocked) {
+      const b1 = Object.freeze({ from: fromId, to: toId, reason: linkInfo.reason });
+      const b2 = Object.freeze({ from: toId, to: fromId, reason: linkInfo.reason });
+      blockedEdges.push(b1);
+      blockedEdges.push(b2);
+      blockedSet.add(`${fromId}->${toId}`);
+      blockedSet.add(`${toId}->${fromId}`);
+      return;
+    }
+
+    const weight = linkInfo.weight ?? 1.0;
+
+    // Forward edge (x1, y1) -> (x2, y2)
+    const edgeForward = createEdge(fromId, toId, weight, linkInfo);
+    edges.push(edgeForward);
+    edgeMap.set(`${fromId}->${toId}`, weight);
+    adjacency.get(fromId).push({
+      to: toId,
+      weight,
+      x: x2,
+      y: y2,
+      ...(linkInfo.isBridge ? { isBridge: true } : {}),
+      ...(linkInfo.isBottleneck ? { isBottleneck: true } : {}),
+    });
+
+    // Backward edge (x2, y2) -> (x1, y1) (bidirectional)
+    const edgeBackward = createEdge(toId, fromId, weight, linkInfo);
+    edges.push(edgeBackward);
+    edgeMap.set(`${toId}->${fromId}`, weight);
+    adjacency.get(toId).push({
+      to: fromId,
+      weight,
+      x: x1,
+      y: y1,
+      ...(linkInfo.isBridge ? { isBridge: true } : {}),
+      ...(linkInfo.isBottleneck ? { isBottleneck: true } : {}),
+    });
+
+    if (linkInfo.isBridge) {
+      bridges.push(edgeForward);
+      bridges.push(edgeBackward);
+      bridgeSet.add(`${fromId}->${toId}`);
+      bridgeSet.add(`${toId}->${fromId}`);
+    }
+
+    if (linkInfo.isBottleneck) {
+      bottlenecks.push(edgeForward);
+      bottlenecks.push(edgeBackward);
+      bottleneckSet.add(`${fromId}->${toId}`);
+      bottleneckSet.add(`${toId}->${fromId}`);
+    }
+  };
+
   // 2. Generate 4-neighbour bidirectional edges
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const fromId = createNodeId(x, y);
-
       // Horizontal edge to right neighbour (x + 1, y)
       if (x + 1 < width) {
-        const toId = createNodeId(x + 1, y);
-        const weight = getScenarioEdgeWeight(x, y, x + 1, y, scenarioMeta.id);
-
-        // Forward edge (x, y) -> (x+1, y)
-        const edgeForward = createEdge(fromId, toId, weight);
-        edges.push(edgeForward);
-        edgeMap.set(`${fromId}->${toId}`, weight);
-        adjacency.get(fromId).push({
-          to: toId,
-          weight,
-          x: x + 1,
-          y,
-        });
-
-        // Backward edge (x+1, y) -> (x, y) (bidirectional)
-        const edgeBackward = createEdge(toId, fromId, weight);
-        edges.push(edgeBackward);
-        edgeMap.set(`${toId}->${fromId}`, weight);
-        adjacency.get(toId).push({
-          to: fromId,
-          weight,
-          x,
-          y,
-        });
+        processLink(x, y, x + 1, y);
       }
 
       // Vertical edge to bottom neighbour (x, y + 1)
       if (y + 1 < height) {
-        const toId = createNodeId(x, y + 1);
-        const weight = getScenarioEdgeWeight(x, y, x, y + 1, scenarioMeta.id);
-
-        // Forward edge (x, y) -> (x, y+1)
-        const edgeForward = createEdge(fromId, toId, weight);
-        edges.push(edgeForward);
-        edgeMap.set(`${fromId}->${toId}`, weight);
-        adjacency.get(fromId).push({
-          to: toId,
-          weight,
-          x,
-          y: y + 1,
-        });
-
-        // Backward edge (x, y+1) -> (x, y) (bidirectional)
-        const edgeBackward = createEdge(toId, fromId, weight);
-        edges.push(edgeBackward);
-        edgeMap.set(`${toId}->${fromId}`, weight);
-        adjacency.get(toId).push({
-          to: fromId,
-          weight,
-          x,
-          y,
-        });
+        processLink(x, y, x, y + 1);
       }
     }
   }
@@ -390,6 +610,12 @@ export function createRoadNetwork({
     edges: Object.freeze(edges),
     adjacency,
     edgeMap,
+    blockedEdges: Object.freeze(blockedEdges),
+    bridges: Object.freeze(bridges),
+    bottlenecks: Object.freeze(bottlenecks),
+    blockedSet: createReadOnlySet(blockedSet),
+    bridgeSet: createReadOnlySet(bridgeSet),
+    bottleneckSet: createReadOnlySet(bottleneckSet),
   };
 
   validateRoadNetwork(network);
@@ -427,4 +653,49 @@ export function getEdgeWeight(network, from, to) {
   const fromId = typeof from === 'string' ? from : createNodeId(from.x, from.y);
   const toId = typeof to === 'string' ? to : createNodeId(to.x, to.y);
   return network.edgeMap.get(`${fromId}->${toId}`) ?? null;
+}
+
+/**
+ * Checks whether a directed link is a designated bridge edge.
+ *
+ * @param {Object} network
+ * @param {string|{x: number, y: number}} from
+ * @param {string|{x: number, y: number}} to
+ * @returns {boolean}
+ */
+export function isBridgeEdge(network, from, to) {
+  if (!network) return false;
+  const fromId = typeof from === 'string' ? from : createNodeId(from.x, from.y);
+  const toId = typeof to === 'string' ? to : createNodeId(to.x, to.y);
+  return network.bridgeSet?.has(`${fromId}->${toId}`) ?? false;
+}
+
+/**
+ * Checks whether a directed link is a designated bottleneck edge.
+ *
+ * @param {Object} network
+ * @param {string|{x: number, y: number}} from
+ * @param {string|{x: number, y: number}} to
+ * @returns {boolean}
+ */
+export function isBottleneckEdge(network, from, to) {
+  if (!network) return false;
+  const fromId = typeof from === 'string' ? from : createNodeId(from.x, from.y);
+  const toId = typeof to === 'string' ? to : createNodeId(to.x, to.y);
+  return network.bottleneckSet?.has(`${fromId}->${toId}`) ?? false;
+}
+
+/**
+ * Checks whether a directed link is a blocked / barrier edge.
+ *
+ * @param {Object} network
+ * @param {string|{x: number, y: number}} from
+ * @param {string|{x: number, y: number}} to
+ * @returns {boolean}
+ */
+export function isBlockedEdge(network, from, to) {
+  if (!network) return false;
+  const fromId = typeof from === 'string' ? from : createNodeId(from.x, from.y);
+  const toId = typeof to === 'string' ? to : createNodeId(to.x, to.y);
+  return network.blockedSet?.has(`${fromId}->${toId}`) ?? false;
 }

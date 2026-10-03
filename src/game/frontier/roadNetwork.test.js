@@ -19,6 +19,10 @@ import {
   getEdgeWeight,
   findShortestPath,
   getRoadDistance,
+  isBridgeEdge,
+  isBottleneckEdge,
+  isBlockedEdge,
+  createReadOnlySet,
 } from './index.js';
 
 describe('LOCUS Frontier Engine — Phase 6B: Road Network & Shortest Paths', () => {
@@ -368,6 +372,254 @@ describe('LOCUS Frontier Engine — Phase 6B: Road Network & Shortest Paths', ()
 
       expect(run1.distance).toBe(run2.distance);
       expect(run1.path).toEqual(run2.path);
+    });
+  });
+
+  describe('6C — Barriers, Bridges & Bottlenecks Topology', () => {
+    const barrierNet = createRoadNetwork({ scenario: ROAD_SCENARIO_IDS.BARRIER });
+    const bridgeNet = createRoadNetwork({ scenario: ROAD_SCENARIO_IDS.BRIDGE });
+    const bottleneckNet = createRoadNetwork({ scenario: ROAD_SCENARIO_IDS.BOTTLENECK });
+
+    describe('6C.1 & 6C.2 — Topology Scenarios & Metadata', () => {
+      it('preserves existing GRID, ARTERIAL, and RING_ARTERIAL scenarios with zero blocked/bridge/bottleneck edges', () => {
+        const grid = createRoadNetwork({ scenario: ROAD_SCENARIO_IDS.GRID });
+        const arterial = createRoadNetwork({ scenario: ROAD_SCENARIO_IDS.ARTERIAL });
+        const ring = createRoadNetwork({ scenario: ROAD_SCENARIO_IDS.RING_ARTERIAL });
+
+        for (const net of [grid, arterial, ring]) {
+          expect(net.edges).toHaveLength(360);
+          expect(net.blockedEdges).toEqual([]);
+          expect(net.bridges).toEqual([]);
+          expect(net.bottlenecks).toEqual([]);
+        }
+      });
+
+      it('BARRIER scenario explicitly marks and removes blocked river edges while preserving row 4 crossing', () => {
+        expect(barrierNet.blockedEdges).toHaveLength(18); // 9 bidirectional pairs
+        expect(barrierNet.edges).toHaveLength(342); // 360 - 18 = 342
+
+        // Blocked edges: horizontal links between col 4 and col 5 for y != 4
+        for (let y = 0; y < 10; y++) {
+          if (y === 4) {
+            // Crossing link preserved
+            expect(isBlockedEdge(barrierNet, `4,${y}`, `5,${y}`)).toBe(false);
+            expect(getEdgeWeight(barrierNet, `4,${y}`, `5,${y}`)).toBe(1.0);
+            expect(getNeighbors(barrierNet, `4,${y}`).some((n) => n.to === `5,${y}`)).toBe(true);
+          } else {
+            // Blocked by river
+            expect(isBlockedEdge(barrierNet, `4,${y}`, `5,${y}`)).toBe(true);
+            expect(isBlockedEdge(barrierNet, `5,${y}`, `4,${y}`)).toBe(true);
+            expect(getEdgeWeight(barrierNet, `4,${y}`, `5,${y}`)).toBeNull();
+            expect(getNeighbors(barrierNet, `4,${y}`).some((n) => n.to === `5,${y}`)).toBe(false);
+          }
+        }
+      });
+
+      it('BRIDGE scenario establishes explicit bridge links and blocks other canal crossings', () => {
+        // Bridges at columns 2 and 7 across rows 4 and 5
+        expect(bridgeNet.bridges).toHaveLength(4); // 2 bidirectional bridge pairs
+        expect(bridgeNet.blockedEdges).toHaveLength(16); // 8 bidirectional blocked canal pairs
+        expect(bridgeNet.edges).toHaveLength(344); // 360 - 16 = 344
+
+        // Identified bridge edges
+        expect(isBridgeEdge(bridgeNet, '2,4', '2,5')).toBe(true);
+        expect(isBridgeEdge(bridgeNet, '2,5', '2,4')).toBe(true);
+        expect(isBridgeEdge(bridgeNet, '7,4', '7,5')).toBe(true);
+        expect(isBridgeEdge(bridgeNet, '7,5', '7,4')).toBe(true);
+
+        // Bridge edge is traversable
+        expect(getEdgeWeight(bridgeNet, '2,4', '2,5')).toBe(1.0);
+        expect(getEdgeWeight(bridgeNet, '7,4', '7,5')).toBe(1.0);
+
+        // Non-bridge crossing is blocked
+        expect(isBridgeEdge(bridgeNet, '4,4', '4,5')).toBe(false);
+        expect(isBlockedEdge(bridgeNet, '4,4', '4,5')).toBe(true);
+        expect(getEdgeWeight(bridgeNet, '4,4', '4,5')).toBeNull();
+      });
+
+      it('BOTTLENECK scenario designates central corridor links and blocks flanking crossings', () => {
+        expect(bottleneckNet.bottlenecks).toHaveLength(4); // 2 bidirectional bottleneck corridors
+        expect(bottleneckNet.blockedEdges).toHaveLength(16); // 8 bidirectional flanking barriers
+        expect(bottleneckNet.edges).toHaveLength(344);
+
+        // Identified bottleneck corridors at cols 4 and 5
+        expect(isBottleneckEdge(bottleneckNet, '4,4', '4,5')).toBe(true);
+        expect(isBottleneckEdge(bottleneckNet, '4,5', '4,4')).toBe(true);
+        expect(isBottleneckEdge(bottleneckNet, '5,4', '5,5')).toBe(true);
+        expect(isBottleneckEdge(bottleneckNet, '5,5', '5,4')).toBe(true);
+
+        // Bottleneck edge is traversable
+        expect(getEdgeWeight(bottleneckNet, '4,4', '4,5')).toBe(1.0);
+
+        // Flanking crossing is blocked
+        expect(isBottleneckEdge(bottleneckNet, '0,4', '0,5')).toBe(false);
+        expect(isBlockedEdge(bottleneckNet, '0,4', '0,5')).toBe(true);
+        expect(getEdgeWeight(bottleneckNet, '0,4', '0,5')).toBeNull();
+      });
+
+      it('scenario creation is strictly deterministic', () => {
+        const b1 = createRoadNetwork({ scenario: ROAD_SCENARIO_IDS.BARRIER });
+        const b2 = createRoadNetwork({ scenario: ROAD_SCENARIO_IDS.BARRIER });
+
+        expect(b1.edges.length).toBe(b2.edges.length);
+        expect(b1.blockedEdges.length).toBe(b2.blockedEdges.length);
+        expect(b1.edges.map((e) => `${e.from}->${e.to}`)).toEqual(
+          b2.edges.map((e) => `${e.from}->${e.to}`)
+        );
+      });
+
+      it('guarantees Set immutability: blockedSet, bridgeSet, and bottleneckSet reject mutation', () => {
+        // 1. Verify read methods work in O(1) time
+        expect(bridgeNet.bridgeSet.has('2,4->2,5')).toBe(true);
+        expect(bridgeNet.bridgeSet.has('0,0->1,0')).toBe(false);
+        expect(bridgeNet.bridgeSet.size).toBe(4);
+        expect([...bridgeNet.bridgeSet]).toHaveLength(4);
+
+        let count = 0;
+        bridgeNet.bridgeSet.forEach(() => {
+          count++;
+        });
+        expect(count).toBe(4);
+
+        // 2. Verify mutation attempts on bridgeSet throw TypeError
+        expect(() => bridgeNet.bridgeSet.add('0,0->1,0')).toThrow(TypeError);
+        expect(() => bridgeNet.bridgeSet.add('0,0->1,0')).toThrow(
+          /Cannot mutate a read-only Set: add\(\) is not allowed/
+        );
+        expect(() => bridgeNet.bridgeSet.delete('2,4->2,5')).toThrow(TypeError);
+        expect(() => bridgeNet.bridgeSet.delete('2,4->2,5')).toThrow(
+          /Cannot mutate a read-only Set: delete\(\) is not allowed/
+        );
+        expect(() => bridgeNet.bridgeSet.clear()).toThrow(TypeError);
+        expect(() => bridgeNet.bridgeSet.clear()).toThrow(
+          /Cannot mutate a read-only Set: clear\(\) is not allowed/
+        );
+
+        // 3. Verify mutation attempts on blockedSet throw TypeError
+        expect(() => barrierNet.blockedSet.add('0,0->1,0')).toThrow(TypeError);
+        expect(() => barrierNet.blockedSet.delete('4,0->5,0')).toThrow(TypeError);
+        expect(() => barrierNet.blockedSet.clear()).toThrow(TypeError);
+
+        // 4. Verify mutation attempts on bottleneckSet throw TypeError
+        expect(() => bottleneckNet.bottleneckSet.add('0,0->1,0')).toThrow(TypeError);
+        expect(() => bottleneckNet.bottleneckSet.delete('4,4->4,5')).toThrow(TypeError);
+        expect(() => bottleneckNet.bottleneckSet.clear()).toThrow(TypeError);
+
+        // 5. Verify property addition is forbidden (frozen object)
+        expect(() => {
+          bridgeNet.bridgeSet.customProperty = 123;
+        }).toThrow(TypeError);
+
+        // 6. Standalone createReadOnlySet behavior
+        const customSet = createReadOnlySet(['linkA', 'linkB']);
+        expect(customSet.has('linkA')).toBe(true);
+        expect(customSet.size).toBe(2);
+        expect(() => customSet.add('linkC')).toThrow(TypeError);
+        expect(() => customSet.delete('linkA')).toThrow(TypeError);
+        expect(() => customSet.clear()).toThrow(TypeError);
+      });
+    });
+
+    describe('6C.3 — Shortest Paths on Topological Scenarios', () => {
+      it('BARRIER scenario forces expected detours around the river barrier', () => {
+        // Direct adjacent nodes across the river barrier at row 0
+        // In GRID: distance is 1 (direct horizontal step)
+        // In BARRIER: (4,0) -> (5,0) is blocked. Route must travel down to row 4 crossing:
+        // (4,0) -> (4,4) [4 steps] + (4,4) -> (5,4) [1 step] + (5,4) -> (5,0) [4 steps] = 9 steps
+        const { reachable, distance, path } = findShortestPath(
+          barrierNet,
+          { x: 4, y: 0 },
+          { x: 5, y: 0 }
+        );
+
+        expect(reachable).toBe(true);
+        expect(distance).toBe(9);
+        expect(path).toHaveLength(10);
+        expect(path[0]).toEqual({ x: 4, y: 0 });
+        expect(path[4]).toEqual({ x: 4, y: 4 }); // Reaches crossing
+        expect(path[5]).toEqual({ x: 5, y: 4 }); // Crosses river
+        expect(path[9]).toEqual({ x: 5, y: 0 }); // Reaches destination
+      });
+
+      it('BRIDGE scenario restores connectivity across canal barrier (unreachable without bridges)', () => {
+        // Start in northern region (y <= 4), end in southern region (y >= 5)
+        const start = { x: 2, y: 2 };
+        const end = { x: 2, y: 7 };
+
+        const resWithBridges = findShortestPath(bridgeNet, start, end);
+        expect(resWithBridges.reachable).toBe(true);
+        expect(resWithBridges.distance).toBe(5); // (2,2) -> (2,3) -> (2,4) -> (2,5) -> (2,6) -> (2,7)
+
+        // Traverses the designated West Bridge
+        const traversesWestBridge = resWithBridges.path.some((pt, idx) => {
+          if (idx === resWithBridges.path.length - 1) return false;
+          const next = resWithBridges.path[idx + 1];
+          return pt.x === 2 && pt.y === 4 && next.x === 2 && next.y === 5;
+        });
+        expect(traversesWestBridge).toBe(true);
+
+        // Disconnected network without bridges: North and South are unreachable
+        const disconnectedNoBridges = {
+          width: 10,
+          height: 10,
+          adjacency: new Map(
+            [...bridgeNet.adjacency.entries()].map(([id, neighbors]) => [
+              id,
+              neighbors.filter((n) => !n.isBridge),
+            ])
+          ),
+        };
+
+        const resNoBridges = findShortestPath(disconnectedNoBridges, start, end);
+        expect(resNoBridges.reachable).toBe(false);
+        expect(resNoBridges.distance).toBe(Infinity);
+        expect(resNoBridges.path).toEqual([]);
+      });
+
+      it('BOTTLENECK scenario routes cross-city traffic through designated bottleneck corridors', () => {
+        // Flow from (1, 1) in North-West to (1, 8) in South-West
+        const { reachable, distance, path } = findShortestPath(
+          bottleneckNet,
+          { x: 1, y: 1 },
+          { x: 1, y: 8 }
+        );
+
+        expect(reachable).toBe(true);
+        expect(distance).toBeGreaterThan(0);
+
+        // Path must pass through the central bottleneck pass at (4,4) -> (4,5)
+        let passedBottleneck = false;
+        for (let i = 0; i < path.length - 1; i++) {
+          const from = `${path[i].x},${path[i].y}`;
+          const to = `${path[i + 1].x},${path[i + 1].y}`;
+          if (isBottleneckEdge(bottleneckNet, from, to)) {
+            passedBottleneck = true;
+            break;
+          }
+        }
+        expect(passedBottleneck).toBe(true);
+      });
+
+      it('path weight sums strictly match calculated distance on all topology networks', () => {
+        const scenarios = [barrierNet, bridgeNet, bottleneckNet];
+
+        for (const net of scenarios) {
+          const { reachable, distance, path } = findShortestPath(
+            net,
+            { x: 0, y: 0 },
+            { x: 9, y: 9 }
+          );
+          expect(reachable).toBe(true);
+
+          let sum = 0;
+          for (let i = 0; i < path.length - 1; i++) {
+            const w = getEdgeWeight(net, path[i], path[i + 1]);
+            expect(w).not.toBeNull();
+            sum += w;
+          }
+          expect(sum).toBe(distance);
+        }
+      });
     });
   });
 });

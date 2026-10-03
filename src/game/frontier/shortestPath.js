@@ -186,6 +186,7 @@ export function findShortestPath(network, start, end) {
       const nextId = neighbor.to;
 
       if (visited.has(nextId)) continue;
+      if (neighbor.isBlocked) continue;
 
       const edgeWeight = neighbor.weight;
       const newDist = currDist + edgeWeight;
