@@ -15,3 +15,4 @@ export * from './strategies.js';
 export * from './payoff.js';
 export * from './equilibrium.js';
 export * from './dynamics.js';
+export * from './quality.js';

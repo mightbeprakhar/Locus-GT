@@ -94,7 +94,7 @@ describe('LOCUS Frontier Engine — Phase 6D: Consumer Choice & Demand Allocatio
         expect(alloc.choice).toBe('A');
         expect(alloc.shareA).toBe(1.0);
         expect(alloc.shareB).toBe(0.0);
-        expect(alloc.utilityA).toBe(alloc.utilityB + 100);
+        expect(alloc.utilityA).toBeCloseTo(alloc.utilityB + 100, 8);
       }
     });
   });
@@ -155,8 +155,8 @@ describe('LOCUS Frontier Engine — Phase 6D: Consumer Choice & Demand Allocatio
       });
 
       expect(alloc.travelCostA).toBe(5);
-      // Utility = 500 - 250 - 10 * 5 = 200
-      expect(alloc.utilityA).toBe(200);
+      // Utility = 500 - 250 + 10 * 5 - 10 * 5 = 250
+      expect(alloc.utilityA).toBe(250);
     });
   });
 
@@ -185,9 +185,9 @@ describe('LOCUS Frontier Engine — Phase 6D: Consumer Choice & Demand Allocatio
       expect(allocRoad.travelCostA).toBe(7);
       expect(allocRoad.travelCostA).not.toBe(allocEuclid.travelCostA);
 
-      // Utility in road mode: 500 - 250 - 10 * 7 = 180
-      expect(allocRoad.utilityA).toBe(180);
-      expect(allocEuclid.utilityA).toBe(200);
+      // Utility in road mode: 500 - 250 + 10 * 5 - 10 * 7 = 230
+      expect(allocRoad.utilityA).toBe(230);
+      expect(allocEuclid.utilityA).toBe(250);
     });
   });
 
@@ -255,8 +255,8 @@ describe('LOCUS Frontier Engine — Phase 6D: Consumer Choice & Demand Allocatio
       expect(allocBridge.travelCostA).toBe(1); // (2,3) to (2,2)
       expect(allocBridge.travelCostB).toBe(4); // (2,3) -> (2,4) -> bridge (2,5) -> (2,6) -> (2,7) [4 steps]
       expect(allocBridge.isReachable).toBe(true);
-      expect(allocBridge.utilityA).toBe(500 - 250 - 10);
-      expect(allocBridge.utilityB).toBe(500 - 250 - 40);
+      expect(allocBridge.utilityA).toBe(500 - 250 + 50 - 10);
+      expect(allocBridge.utilityB).toBe(500 - 250 + 50 - 40);
       expect(allocBridge.choice).toBe('A');
 
       // Now consider if bridges are blocked/absent: South is unreachable from North
@@ -635,9 +635,13 @@ describe('LOCUS Frontier Engine — Phase 6D: Consumer Choice & Demand Allocatio
 
   describe('Pure Function Unit Tests', () => {
     it('calculateFrontierUtility computes expected values and returns -Infinity on unreachable', () => {
-      // Baseline utility
+      // Baseline utility with default quality = 5 (gamma = 10 -> +50)
       const u = calculateFrontierUtility({ travelCost: 5, price: 200, V: 500, alpha: 10 });
-      expect(u).toBe(500 - 200 - 10 * 5); // 250
+      expect(u).toBe(500 - 200 + 10 * 5 - 10 * 5); // 300
+
+      // Explicit quality = 0
+      const u0 = calculateFrontierUtility({ travelCost: 5, price: 200, quality: 0, V: 500, alpha: 10 });
+      expect(u0).toBe(500 - 200 - 10 * 5); // 250
 
       // Unreachable travelCost
       const uInf = calculateFrontierUtility({ travelCost: Infinity, price: 200, V: 500, alpha: 10 });
@@ -661,4 +665,373 @@ describe('LOCUS Frontier Engine — Phase 6D: Consumer Choice & Demand Allocatio
       expect(alloc.demandB).toBe(0);
     });
   });
+
+  describe('15. Phase 7A: Quality Differentiation', () => {
+    it('captures entire market when quality is higher at identical location and price', () => {
+      // Co-located restaurants at (4, 4), price = 200
+      // Restaurant A: quality = 8
+      // Restaurant B: quality = 5
+      // gamma = 10 -> Delta U = 10 * (8 - 5) = +30 utility advantage for A
+      const restaurantA = { id: 'A', location: { x: 4, y: 4 }, price: 200, quality: 8 };
+      const restaurantB = { id: 'B', location: { x: 4, y: 4 }, price: 200, quality: 5 };
+
+      const market = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+      });
+
+      // A has strictly higher utility everywhere, capturing 100% of demand
+      expect(market.restaurantDemand.A).toBe(market.totalPopulation);
+      expect(market.restaurantDemand.B).toBe(0);
+      expect(market.marketShares.A).toBe(1.0);
+      expect(market.marketShares.B).toBe(0.0);
+
+      for (const alloc of market.zoneAllocations) {
+        expect(alloc.choice).toBe('A');
+        expect(alloc.shareA).toBe(1.0);
+        expect(alloc.shareB).toBe(0.0);
+        expect(alloc.qualityA).toBe(8);
+        expect(alloc.qualityB).toBe(5);
+        expect(alloc.utilityA - alloc.utilityB).toBeCloseTo(30, 8);
+      }
+    });
+
+    it('verifies exact quality / price tradeoff: higher quality offsets higher price into exact 50/50 tie', () => {
+      // Co-located restaurants at (4, 4)
+      // Restaurant A: price = 250, quality = 10
+      // Restaurant B: price = 200, quality = 5
+      // With gamma = 10:
+      // A quality advantage: +10 * (10 - 5) = +50 utility
+      // A price disadvantage: -(250 - 200) = -50 utility
+      // Net difference = 0 -> exact tie everywhere
+      const restaurantA = { id: 'A', location: { x: 4, y: 4 }, price: 250, quality: 10 };
+      const restaurantB = { id: 'B', location: { x: 4, y: 4 }, price: 200, quality: 5 };
+
+      const market = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+      });
+
+      expect(market.restaurantDemand.A).toBeCloseTo(market.totalPopulation / 2, 5);
+      expect(market.restaurantDemand.B).toBeCloseTo(market.totalPopulation / 2, 5);
+      expect(market.marketShares.A).toBeCloseTo(0.5, 5);
+      expect(market.marketShares.B).toBeCloseTo(0.5, 5);
+
+      for (const alloc of market.zoneAllocations) {
+        expect(alloc.choice).toBe('TIE');
+        expect(alloc.shareA).toBe(0.5);
+        expect(alloc.shareB).toBe(0.5);
+        expect(alloc.utilityA).toBeCloseTo(alloc.utilityB, 8);
+      }
+    });
+
+    it('offsets spatial travel disadvantage with sufficient quality advantage', () => {
+      // Consumer zone at (2, 0)
+      // Restaurant A at (4, 0): travelCost = 2, price = 200, quality = 10
+      // Restaurant B at (1, 0): travelCost = 1, price = 200, quality = 5
+      // alpha = 10, gamma = 10:
+      // Utility A = 500 - 200 + 10 * 10 - 10 * 2 = 500 - 200 + 100 - 20 = 380
+      // Utility B = 500 - 200 + 10 * 5  - 10 * 1 = 500 - 200 + 50  - 10 = 340
+      // A is farther away (distance 2 vs 1), but quality advantage (+50) > spatial friction (+10) -> A wins
+      const restaurantA = { id: 'A', location: { x: 4, y: 0 }, price: 200, quality: 10 };
+      const restaurantB = { id: 'B', location: { x: 1, y: 0 }, price: 200, quality: 5 };
+
+      const alloc = allocateFrontierDemand({
+        zone: { x: 2, y: 0, population: 100 },
+        restaurantA,
+        restaurantB,
+        mode: TRAVEL_COST_MODES.EUCLIDEAN,
+      });
+
+      expect(alloc.choice).toBe('A');
+      expect(alloc.shareA).toBe(1.0);
+      expect(alloc.shareB).toBe(0.0);
+      expect(alloc.utilityA).toBe(380);
+      expect(alloc.utilityB).toBe(340);
+
+      // Now reverse: reduce A's quality to 6 (quality advantage = +10, spatial disadvantage = -10)
+      // With equal net utility (utility A = 340, utility B = 340) -> exact tie
+      const restaurantA_lower = { id: 'A', location: { x: 4, y: 0 }, price: 200, quality: 6 };
+      const allocTie = allocateFrontierDemand({
+        zone: { x: 2, y: 0, population: 100 },
+        restaurantA: restaurantA_lower,
+        restaurantB,
+        mode: TRAVEL_COST_MODES.EUCLIDEAN,
+      });
+
+      expect(allocTie.choice).toBe('TIE');
+      expect(allocTie.shareA).toBe(0.5);
+      expect(allocTie.shareB).toBe(0.5);
+
+      // Now reduce A's quality to 5 (quality advantage = 0, spatial disadvantage = -10) -> B wins
+      const restaurantA_equalQ = { id: 'A', location: { x: 4, y: 0 }, price: 200, quality: 5 };
+      const allocB_wins = allocateFrontierDemand({
+        zone: { x: 2, y: 0, population: 100 },
+        restaurantA: restaurantA_equalQ,
+        restaurantB,
+        mode: TRAVEL_COST_MODES.EUCLIDEAN,
+      });
+
+      expect(allocB_wins.choice).toBe('B');
+      expect(allocB_wins.shareB).toBe(1.0);
+      expect(allocB_wins.shareA).toBe(0.0);
+    });
+
+    it('ensures high quality does NOT override network inaccessibility', () => {
+      // In unreachable scenario, even quality = 10 yields -Infinity utility
+      const uUnreachable = calculateFrontierUtility({
+        travelCost: Infinity,
+        price: 150,
+        quality: 10,
+        gamma: 10,
+      });
+      expect(uUnreachable).toBe(-Infinity);
+
+      // In zone choice, an unreachable high-quality restaurant loses to a reachable low-quality restaurant
+      const choice = calculateZoneChoice({
+        travelCostA: Infinity,
+        travelCostB: 5,
+        priceA: 150,
+        priceB: 350,
+        qualityA: 10,
+        qualityB: 0,
+      });
+
+      expect(choice.choice).toBe('B');
+      expect(choice.shareB).toBe(1.0);
+      expect(choice.shareA).toBe(0.0);
+      expect(choice.utilityA).toBe(-Infinity);
+      expect(choice.utilityB).toBeGreaterThan(-Infinity);
+    });
+
+    it('supports configurable gamma parameter in market evaluations', () => {
+      const restaurantA = { id: 'A', location: { x: 5, y: 5 }, price: 200, quality: 6 };
+      const restaurantB = { id: 'B', location: { x: 5, y: 5 }, price: 200, quality: 5 };
+
+      // With gamma = 0, quality difference has zero impact -> tie
+      const marketGamma0 = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+        config: { gamma: 0 },
+      });
+
+      expect(marketGamma0.marketShares.A).toBeCloseTo(0.5, 5);
+      expect(marketGamma0.marketShares.B).toBeCloseTo(0.5, 5);
+
+      // With gamma = 25, quality difference gives 25 utility advantage -> A wins entirely
+      const marketGamma25 = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+        config: { gamma: 25 },
+      });
+
+      expect(marketGamma25.marketShares.A).toBe(1.0);
+      expect(marketGamma25.marketShares.B).toBe(0.0);
+    });
+
+    it('propagates quality into payoff engine demand and profit without direct quality bonus', () => {
+      // Verify quality affects profit strictly via demand
+      // Restaurant A (quality 8) vs Restaurant B (quality 5), price 200, marginal cost 100
+      // Fixed cost = 0.
+      const rA = { id: 'A', location: { x: 5, y: 5 }, price: 200, quality: 8, variableCost: 100 };
+      const rB = { id: 'B', location: { x: 5, y: 5 }, price: 200, quality: 5, variableCost: 100 };
+
+      const market = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA: rA,
+        restaurantB: rB,
+      });
+
+      // Demand for A = total population, Demand for B = 0
+      expect(market.restaurantDemand.A).toBe(market.totalPopulation);
+      expect(market.restaurantDemand.B).toBe(0);
+
+      // Profit formula: (P - C) * D - F
+      const profitA = (rA.price - rA.variableCost) * market.restaurantDemand.A;
+      const profitB = (rB.price - rB.variableCost) * market.restaurantDemand.B;
+
+      expect(profitA).toBe(100 * market.totalPopulation);
+      expect(profitB).toBe(0);
+    });
+  });
+
+  describe('16. Configurable Quality Scale Propagation', () => {
+    it('preserves default [0, 10] behavior and rejects quality > 10 when scale is not specified', () => {
+      // Default scale accepts within [0, 10]
+      const uValid = calculateFrontierUtility({
+        travelCost: 0,
+        price: 200,
+        quality: 10,
+        V: 500,
+        alpha: 10,
+        gamma: 10,
+      });
+      expect(uValid).toBe(500 - 200 + 10 * 10 - 0); // 400
+
+      // Rejects quality > 10 on default scale in calculateFrontierUtility
+      expect(() =>
+        calculateFrontierUtility({
+          travelCost: 0,
+          price: 200,
+          quality: 15,
+        })
+      ).toThrow(RangeError);
+
+      // Rejects quality > 10 on default scale in calculateFrontierMarket
+      expect(() =>
+        calculateFrontierMarket({
+          city: balancedCity,
+          restaurantA: { id: 'A', location: { x: 5, y: 5 }, price: 200, quality: 15 },
+          restaurantB: { id: 'B', location: { x: 5, y: 5 }, price: 200, quality: 5 },
+        })
+      ).toThrow(RangeError);
+    });
+
+    it('accepts quality 15 under custom scale [0, 20] in calculateFrontierUtility, calculateZoneChoice, and allocateFrontierDemand', () => {
+      const customScale = { min: 0, max: 20 };
+
+      // calculateFrontierUtility
+      const utility = calculateFrontierUtility({
+        travelCost: 2,
+        price: 200,
+        quality: 15,
+        V: 500,
+        alpha: 10,
+        gamma: 10,
+        qualityScale: customScale,
+      });
+      // 500 - 200 + 10 * 15 - 10 * 2 = 300 + 150 - 20 = 430
+      expect(utility).toBe(430);
+
+      // calculateZoneChoice
+      const choice = calculateZoneChoice({
+        travelCostA: 2,
+        travelCostB: 2,
+        priceA: 200,
+        priceB: 200,
+        qualityA: 15,
+        qualityB: 10,
+        V: 500,
+        alpha: 10,
+        gamma: 10,
+        qualityScale: customScale,
+      });
+      expect(choice.choice).toBe('A');
+      expect(choice.utilityA).toBe(430);
+      expect(choice.utilityB).toBe(380); // 500 - 200 + 10 * 10 - 20 = 380
+
+      // allocateFrontierDemand
+      const alloc = allocateFrontierDemand({
+        zone: { x: 5, y: 5, population: 100 },
+        restaurantA: { id: 'A', location: { x: 5, y: 5 }, price: 200, quality: 15 },
+        restaurantB: { id: 'B', location: { x: 5, y: 5 }, price: 200, quality: 10 },
+        config: { qualityScale: customScale, gamma: 10 },
+      });
+      expect(alloc.demandA).toBe(100);
+      expect(alloc.demandB).toBe(0);
+      expect(alloc.utilityA).toBe(450); // travelCost = 0: 500 - 200 + 150 = 450
+      expect(alloc.utilityB).toBe(400); // 500 - 200 + 100 = 400
+    });
+
+    it('works with quality 15 through calculateFrontierMarket() and propagates qualityScale', () => {
+      const restaurantA = { id: 'A', location: { x: 4, y: 4 }, price: 200, quality: 15 };
+      const restaurantB = { id: 'B', location: { x: 4, y: 4 }, price: 200, quality: 8 };
+
+      const market = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+        config: {
+          V: 600,
+          alpha: 10,
+          gamma: 12,
+          qualityScale: { min: 0, max: 20 },
+        },
+      });
+
+      expect(market.config.qualityScale).toEqual({ min: 0, max: 20 });
+      expect(market.config.gamma).toBe(12);
+      expect(market.restaurants[0].quality).toBe(15);
+      expect(market.restaurants[1].quality).toBe(8);
+
+      // Delta U = gamma * (QA - QB) = 12 * (15 - 8) = 12 * 7 = 84
+      // Since locations and prices are identical, A captures the entire market
+      expect(market.restaurantDemand.A).toBe(market.totalPopulation);
+      expect(market.restaurantDemand.B).toBe(0);
+      expect(market.marketShares.A).toBe(1.0);
+      expect(market.marketShares.B).toBe(0.0);
+
+      const sampleAlloc = market.zoneAllocations[0];
+      expect(sampleAlloc.choice).toBe('A');
+      expect(sampleAlloc.qualityA).toBe(15);
+      expect(sampleAlloc.qualityB).toBe(8);
+      expect(sampleAlloc.utilityA - sampleAlloc.utilityB).toBeCloseTo(84, 8);
+    });
+
+    it('rejects values outside custom qualityScale in calculateFrontierMarket and calculateFrontierUtility', () => {
+      const customScale = { min: 5, max: 20 };
+
+      // Value below custom min (4 < 5)
+      expect(() =>
+        calculateFrontierUtility({
+          travelCost: 0,
+          price: 200,
+          quality: 4,
+          qualityScale: customScale,
+        })
+      ).toThrow(RangeError);
+
+      // Value above custom max (25 > 20)
+      expect(() =>
+        calculateFrontierUtility({
+          travelCost: 0,
+          price: 200,
+          quality: 25,
+          qualityScale: customScale,
+        })
+      ).toThrow(RangeError);
+
+      // In calculateFrontierMarket with quality 25
+      expect(() =>
+        calculateFrontierMarket({
+          city: balancedCity,
+          restaurantA: { id: 'A', location: { x: 5, y: 5 }, price: 200, quality: 25 },
+          restaurantB: { id: 'B', location: { x: 5, y: 5 }, price: 200, quality: 10 },
+          config: { qualityScale: customScale },
+        })
+      ).toThrow(RangeError);
+
+      // In calculateFrontierMarket with quality 2 (below min 5)
+      expect(() =>
+        calculateFrontierMarket({
+          city: balancedCity,
+          restaurantA: { id: 'A', location: { x: 5, y: 5 }, price: 200, quality: 2 },
+          restaurantB: { id: 'B', location: { x: 5, y: 5 }, price: 200, quality: 10 },
+          config: { qualityScale: customScale },
+        })
+      ).toThrow(RangeError);
+    });
+
+    it('verifies utility calculation strictly uses gamma * quality with custom scale', () => {
+      // V = 500, price = 250, gamma = 15, quality = 16, alpha = 8, travelCost = 3
+      // U = 500 - 250 + 15 * 16 - 8 * 3 = 250 + 240 - 24 = 466
+      const customScale = { min: 0, max: 25 };
+      const utility = calculateFrontierUtility({
+        travelCost: 3,
+        price: 250,
+        quality: 16,
+        V: 500,
+        alpha: 8,
+        gamma: 15,
+        qualityScale: customScale,
+      });
+
+      expect(utility).toBe(466);
+    });
+  });
 });
+

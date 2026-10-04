@@ -92,11 +92,12 @@ function normalizeFrontierRestaurants(options) {
     );
   }
 
-  // Ensure canonical { id, location, price } shape
+  // Ensure canonical { id, location, price, quality } shape
   const normA = {
     id: rA.id ?? 'A',
     location: rA.location ?? (rA.x !== undefined && rA.y !== undefined ? { x: rA.x, y: rA.y } : undefined),
     price: rA.price,
+    quality: rA.quality,
     variableCost: rA.variableCost,
     fixedCost: rA.fixedCost,
   };
@@ -105,6 +106,7 @@ function normalizeFrontierRestaurants(options) {
     id: rB.id ?? 'B',
     location: rB.location ?? (rB.x !== undefined && rB.y !== undefined ? { x: rB.x, y: rB.y } : undefined),
     price: rB.price,
+    quality: rB.quality,
     variableCost: rB.variableCost,
     fixedCost: rB.fixedCost,
   };
@@ -199,12 +201,14 @@ export function calculateFrontierPayoff(options = {}) {
       demand: demandA,
       marketShare: marketShareA,
       profit: profitA,
+      quality: market.restaurants[0].quality,
     }),
     restaurantB: Object.freeze({
       id: idB,
       demand: demandB,
       marketShare: marketShareB,
       profit: profitB,
+      quality: market.restaurants[1].quality,
     }),
     totalPopulation: market.totalPopulation,
     reachablePopulation: market.reachablePopulation,

@@ -1,6 +1,6 @@
 /**
  * @file consumerChoice.js
- * @description Frontier consumer-choice and demand allocation engine (Phase 6D).
+ * @description Frontier consumer-choice and demand allocation engine with quality differentiation (Phase 7A).
  *
  * Architecture:
  *   Frontier City (Urban Geography & Effective Population)
@@ -13,7 +13,19 @@
  *
  * Mathematical Model:
  * For consumer zone i and restaurant j:
- *   U_ij = V - P_j - alpha * T_ij
+ *   U_ij = V - P_j + gamma * Q_j - alpha * T_ij
+ *
+ * Parameters:
+ *   V     = baseline consumer reservation valuation
+ *   P_j   = price charged by restaurant j
+ *   Q_j   = restaurant quality level
+ *   gamma = consumer sensitivity to quality (marginal utility per quality unit)
+ *   alpha = travel friction sensitivity
+ *   T_ij  = spatial travel cost between consumer zone i and restaurant j
+ *
+ * Quality Impact:
+ *   Quality affects demand through consumer utility U_ij, expanding market share
+ *   and customer demand rather than entering firm payoff equations directly.
  *
  * Decision Rule:
  *   utilityA > utilityB  => shareA = 1, shareB = 0
@@ -21,6 +33,7 @@
  *   utilityA === utilityB (within float tolerance) => shareA = 0.5, shareB = 0.5
  *
  * Disconnected Topology / Unreachable Zones:
+ *   Unreachable restaurants (T_ij = Infinity) strictly yield U_ij = -Infinity.
  *   Both restaurants unreachable (T_iA = Infinity, T_iB = Infinity)
  *     => shareA = 0, shareB = 0 (contributes to unreachablePopulation)
  *   Only A reachable (T_iA < Infinity, T_iB = Infinity)
@@ -32,6 +45,13 @@
 import { DEFAULT_GRID, DEFAULT_PARAMS, FLOAT_EPSILON } from '../types.js';
 import { isValidCoordinate } from './roadNetwork.js';
 import { TRAVEL_COST_MODES, getTravelCost } from './travelCost.js';
+import {
+  DEFAULT_QUALITY,
+  DEFAULT_GAMMA,
+  DEFAULT_QUALITY_SCALE,
+  validateFrontierQuality,
+  validateQualityConfig,
+} from './quality.js';
 
 /**
  * Validates and normalizes an input restaurant object.
@@ -42,7 +62,13 @@ import { TRAVEL_COST_MODES, getTravelCost } from './travelCost.js';
  * @param {number} height - Grid height
  * @returns {Readonly<{ id: string, location: { x: number, y: number }, price: number }>}
  */
-function validateRestaurant(r, label, width = DEFAULT_GRID.width, height = DEFAULT_GRID.height) {
+function validateRestaurant(
+  r,
+  label,
+  width = DEFAULT_GRID.width,
+  height = DEFAULT_GRID.height,
+  qualityScale = DEFAULT_QUALITY_SCALE
+) {
   if (!r || typeof r !== 'object') {
     throw new TypeError(`Restaurant ${label} must be a valid object.`);
   }
@@ -80,10 +106,23 @@ function validateRestaurant(r, label, width = DEFAULT_GRID.width, height = DEFAU
     throw new RangeError(`Restaurant ${label} price must be non-negative, received ${r.price}.`);
   }
 
+  const scale = qualityScale ?? DEFAULT_QUALITY_SCALE;
+  const quality = r.quality !== undefined ? r.quality : DEFAULT_QUALITY;
+  if (typeof quality !== 'number' || !Number.isFinite(quality)) {
+    throw new TypeError(`Restaurant ${label} quality must be a finite number.`);
+  }
+
+  if (!validateFrontierQuality(quality, scale)) {
+    throw new RangeError(
+      `Restaurant ${label} quality ${quality} is outside allowed scale [${scale.min}, ${scale.max}].`
+    );
+  }
+
   return Object.freeze({
     id: r.id.trim(),
     location: Object.freeze({ x, y }),
     price: r.price,
+    quality,
   });
 }
 
@@ -93,9 +132,10 @@ function validateRestaurant(r, label, width = DEFAULT_GRID.width, height = DEFAU
  * @param {Object} options
  * @param {number} width
  * @param {number} height
+ * @param {Object} [qualityScale=DEFAULT_QUALITY_SCALE]
  * @returns {[Readonly<Object>, Readonly<Object>]}
  */
-function extractRestaurants(options, width, height) {
+function extractRestaurants(options, width, height, qualityScale = DEFAULT_QUALITY_SCALE) {
   let rA, rB;
 
   if (options.restaurants !== undefined) {
@@ -116,8 +156,8 @@ function extractRestaurants(options, width, height) {
     );
   }
 
-  const validA = validateRestaurant(rA, 'A', width, height);
-  const validB = validateRestaurant(rB, 'B', width, height);
+  const validA = validateRestaurant(rA, 'A', width, height, qualityScale);
+  const validB = validateRestaurant(rB, 'B', width, height, qualityScale);
 
   if (validA.id === validB.id) {
     throw new RangeError(`Duplicate restaurant ID "${validA.id}". Restaurant IDs must be unique.`);
@@ -127,22 +167,28 @@ function extractRestaurants(options, width, height) {
 }
 
 /**
- * Calculates consumer utility U_ij for a given travel distance and price.
+ * Calculates consumer utility U_ij for a given travel distance, price, and quality.
  *
- *   U_ij = V - P_j - alpha * T_ij
+ *   U_ij = V - P_j + gamma * Q_j - alpha * T_ij
  *
  * @param {Object} params
  * @param {number} params.travelCost - Travel distance / friction (T_ij)
  * @param {number} params.price - Restaurant price (P_j)
+ * @param {number} [params.quality=DEFAULT_QUALITY] - Restaurant quality level (Q_j)
  * @param {number} [params.V=DEFAULT_PARAMS.V] - Baseline consumer valuation
  * @param {number} [params.alpha=DEFAULT_PARAMS.alpha] - Travel sensitivity factor
+ * @param {number} [params.gamma=DEFAULT_GAMMA] - Quality sensitivity factor
+ * @param {Object} [params.qualityScale=DEFAULT_QUALITY_SCALE] - Configured quality scale bounds
  * @returns {number} Calculated utility (or -Infinity if unreachable)
  */
 export function calculateFrontierUtility({
   travelCost,
   price,
+  quality = DEFAULT_QUALITY,
   V = DEFAULT_PARAMS.V,
   alpha = DEFAULT_PARAMS.alpha,
+  gamma = DEFAULT_GAMMA,
+  qualityScale = DEFAULT_QUALITY_SCALE,
 }) {
   if (typeof price !== 'number' || !Number.isFinite(price)) {
     throw new TypeError('calculateFrontierUtility requires a finite price.');
@@ -150,20 +196,31 @@ export function calculateFrontierUtility({
   if (typeof travelCost !== 'number') {
     throw new TypeError('calculateFrontierUtility requires a numeric travelCost.');
   }
+  if (typeof quality !== 'number' || !Number.isFinite(quality)) {
+    throw new TypeError('calculateFrontierUtility requires a finite quality.');
+  }
+  const scale = qualityScale ?? DEFAULT_QUALITY_SCALE;
+  if (!validateFrontierQuality(quality, scale)) {
+    throw new RangeError(
+      `calculateFrontierUtility quality ${quality} is outside allowed scale [${scale.min}, ${scale.max}].`
+    );
+  }
   if (
     typeof V !== 'number' ||
     !Number.isFinite(V) ||
     typeof alpha !== 'number' ||
-    !Number.isFinite(alpha)
+    !Number.isFinite(alpha) ||
+    typeof gamma !== 'number' ||
+    !Number.isFinite(gamma)
   ) {
-    throw new TypeError('calculateFrontierUtility requires finite V and alpha values.');
+    throw new TypeError('calculateFrontierUtility requires finite V, alpha, and gamma values.');
   }
 
   if (travelCost === Infinity) {
     return -Infinity;
   }
 
-  return V - price - alpha * travelCost;
+  return V - price + gamma * quality - alpha * travelCost;
 }
 
 /**
@@ -174,8 +231,12 @@ export function calculateFrontierUtility({
  * @param {number} params.travelCostB - Travel cost to restaurant B
  * @param {number} params.priceA - Price of restaurant A
  * @param {number} params.priceB - Price of restaurant B
+ * @param {number} [params.qualityA=DEFAULT_QUALITY] - Quality of restaurant A
+ * @param {number} [params.qualityB=DEFAULT_QUALITY] - Quality of restaurant B
  * @param {number} [params.V=DEFAULT_PARAMS.V] - Reservation valuation
  * @param {number} [params.alpha=DEFAULT_PARAMS.alpha] - Travel sensitivity
+ * @param {number} [params.gamma=DEFAULT_GAMMA] - Quality sensitivity factor
+ * @param {Object} [params.qualityScale=DEFAULT_QUALITY_SCALE] - Configured quality scale bounds
  * @param {number} [params.tolerance=FLOAT_EPSILON] - Numerical tie tolerance
  * @returns {Readonly<{
  *   choice: 'A'|'B'|'TIE'|'NONE',
@@ -185,6 +246,8 @@ export function calculateFrontierUtility({
  *   utilityB: number,
  *   travelCostA: number,
  *   travelCostB: number,
+ *   qualityA: number,
+ *   qualityB: number,
  *   isReachable: boolean
  * }>}
  */
@@ -193,12 +256,32 @@ export function calculateZoneChoice({
   travelCostB,
   priceA,
   priceB,
+  qualityA = DEFAULT_QUALITY,
+  qualityB = DEFAULT_QUALITY,
   V = DEFAULT_PARAMS.V,
   alpha = DEFAULT_PARAMS.alpha,
+  gamma = DEFAULT_GAMMA,
+  qualityScale = DEFAULT_QUALITY_SCALE,
   tolerance = FLOAT_EPSILON,
 }) {
-  const utilityA = calculateFrontierUtility({ travelCost: travelCostA, price: priceA, V, alpha });
-  const utilityB = calculateFrontierUtility({ travelCost: travelCostB, price: priceB, V, alpha });
+  const utilityA = calculateFrontierUtility({
+    travelCost: travelCostA,
+    price: priceA,
+    quality: qualityA,
+    V,
+    alpha,
+    gamma,
+    qualityScale,
+  });
+  const utilityB = calculateFrontierUtility({
+    travelCost: travelCostB,
+    price: priceB,
+    quality: qualityB,
+    V,
+    alpha,
+    gamma,
+    qualityScale,
+  });
 
   const aIsReachable = travelCostA < Infinity;
   const bIsReachable = travelCostB < Infinity;
@@ -213,6 +296,8 @@ export function calculateZoneChoice({
       utilityB,
       travelCostA,
       travelCostB,
+      qualityA,
+      qualityB,
       isReachable: false,
     });
   }
@@ -226,6 +311,8 @@ export function calculateZoneChoice({
       utilityB,
       travelCostA,
       travelCostB,
+      qualityA,
+      qualityB,
       isReachable: true,
     });
   }
@@ -239,6 +326,8 @@ export function calculateZoneChoice({
       utilityB,
       travelCostA,
       travelCostB,
+      qualityA,
+      qualityB,
       isReachable: true,
     });
   }
@@ -255,6 +344,8 @@ export function calculateZoneChoice({
       utilityB,
       travelCostA,
       travelCostB,
+      qualityA,
+      qualityB,
       isReachable: true,
     });
   }
@@ -268,6 +359,8 @@ export function calculateZoneChoice({
       utilityB,
       travelCostA,
       travelCostB,
+      qualityA,
+      qualityB,
       isReachable: true,
     });
   }
@@ -280,6 +373,8 @@ export function calculateZoneChoice({
     utilityB,
     travelCostA,
     travelCostB,
+    qualityA,
+    qualityB,
     isReachable: true,
   });
 }
@@ -294,7 +389,7 @@ export function calculateZoneChoice({
  * @param {Object} params.restaurantB - Restaurant B definition
  * @param {'euclidean'|'road'} [params.mode=TRAVEL_COST_MODES.EUCLIDEAN] - Travel cost mode
  * @param {Object} [params.roadNetwork] - Required when mode is 'road'
- * @param {{V?: number, alpha?: number}} [params.config=DEFAULT_PARAMS]
+ * @param {{V?: number, alpha?: number, gamma?: number, qualityScale?: { min?: number, max?: number }}} [params.config=DEFAULT_PARAMS]
  * @param {number} [params.tolerance=FLOAT_EPSILON]
  * @returns {Readonly<{
  *   zone: { x: number, y: number },
@@ -303,6 +398,8 @@ export function calculateZoneChoice({
  *   travelCostB: number,
  *   utilityA: number,
  *   utilityB: number,
+ *   qualityA: number,
+ *   qualityB: number,
  *   shareA: number,
  *   shareB: number,
  *   demandA: number,
@@ -347,13 +444,22 @@ export function allocateFrontierDemand({
     roadNetwork,
   });
 
+  const qualityA = restaurantA.quality ?? DEFAULT_QUALITY;
+  const qualityB = restaurantB.quality ?? DEFAULT_QUALITY;
+  const gamma = config?.gamma ?? DEFAULT_GAMMA;
+  const qualityScale = config?.qualityScale ?? DEFAULT_QUALITY_SCALE;
+
   const choiceResult = calculateZoneChoice({
     travelCostA,
     travelCostB,
     priceA: restaurantA.price,
     priceB: restaurantB.price,
+    qualityA,
+    qualityB,
     V: config?.V ?? DEFAULT_PARAMS.V,
     alpha: config?.alpha ?? DEFAULT_PARAMS.alpha,
+    gamma,
+    qualityScale,
     tolerance,
   });
 
@@ -367,6 +473,8 @@ export function allocateFrontierDemand({
     travelCostB,
     utilityA: choiceResult.utilityA,
     utilityB: choiceResult.utilityB,
+    qualityA: choiceResult.qualityA,
+    qualityB: choiceResult.qualityB,
     shareA: choiceResult.shareA,
     shareB: choiceResult.shareB,
     demandA,
@@ -387,7 +495,7 @@ export function allocateFrontierDemand({
  * @param {Array<Object>} [options.restaurants] - Alternative [rA, rB] array
  * @param {'euclidean'|'road'} [options.mode=TRAVEL_COST_MODES.EUCLIDEAN] - Travel cost mode
  * @param {Object} [options.roadNetwork] - Required when mode is 'road'
- * @param {{V?: number, alpha?: number}} [options.config=DEFAULT_PARAMS]
+ * @param {{V?: number, alpha?: number, gamma?: number, qualityScale?: { min?: number, max?: number }}} [options.config=DEFAULT_PARAMS]
  * @param {number} [options.tolerance=FLOAT_EPSILON]
  * @returns {Readonly<{
  *   restaurantDemand: Record<string, number>,
@@ -398,8 +506,8 @@ export function allocateFrontierDemand({
  *   reachablePopulation: number,
  *   unreachablePopulation: number,
  *   travelCostMode: string,
- *   config: { V: number, alpha: number },
- *   restaurants: Array<{ id: string, location: { x: number, y: number }, price: number }>
+ *   config: { V: number, alpha: number, gamma: number, qualityScale: { min: number, max: number } },
+ *   restaurants: Array<{ id: string, location: { x: number, y: number }, price: number, quality: number }>
  * }>}
  */
 export function calculateFrontierMarket(options = {}) {
@@ -440,10 +548,23 @@ export function calculateFrontierMarket(options = {}) {
   const width = city.width ?? DEFAULT_GRID.width;
   const height = city.height ?? DEFAULT_GRID.height;
 
-  const [restaurantA, restaurantB] = extractRestaurants(options, width, height);
+  const qualityConfig = validateQualityConfig({
+    gamma: config?.gamma,
+    qualityScale: config?.qualityScale,
+  });
+  const { gamma, qualityScale } = qualityConfig;
+
+  const [restaurantA, restaurantB] = extractRestaurants(options, width, height, qualityScale);
 
   const V = config?.V ?? DEFAULT_PARAMS.V;
   const alpha = config?.alpha ?? DEFAULT_PARAMS.alpha;
+
+  const marketConfig = Object.freeze({
+    V,
+    alpha,
+    gamma,
+    qualityScale,
+  });
 
   const cells = city.cells;
   const zoneAllocations = [];
@@ -465,7 +586,7 @@ export function calculateFrontierMarket(options = {}) {
       restaurantB,
       mode,
       roadNetwork,
-      config: { V, alpha },
+      config: marketConfig,
       tolerance,
     });
 
@@ -508,7 +629,7 @@ export function calculateFrontierMarket(options = {}) {
     reachablePopulation,
     unreachablePopulation,
     travelCostMode: mode,
-    config: Object.freeze({ V, alpha }),
+    config: marketConfig,
     restaurants: Object.freeze([
       Object.freeze({ ...restaurantA }),
       Object.freeze({ ...restaurantB }),
