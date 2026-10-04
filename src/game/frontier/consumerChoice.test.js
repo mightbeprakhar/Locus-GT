@@ -15,6 +15,8 @@ import {
   calculateZoneChoice,
   allocateFrontierDemand,
   calculateFrontierMarket,
+  createConsumerSegment,
+  DEFAULT_CONSUMER_SEGMENT,
 } from './index.js';
 
 describe('LOCUS Frontier Engine — Phase 6D: Consumer Choice & Demand Allocation', () => {
@@ -1033,5 +1035,799 @@ describe('LOCUS Frontier Engine — Phase 6D: Consumer Choice & Demand Allocatio
       expect(utility).toBe(466);
     });
   });
+
+  describe('17. Phase 7B: Heterogeneous Consumers & Segments', () => {
+    it('directly validates the segment utility formula: U_ij^(k) = V_k - beta_k * P_j + gamma_k * Q_j - alpha_k * T_ij', () => {
+      // Numerical example:
+      // V = 600, beta = 1.5, price = 200, gamma = 12, quality = 8, alpha = 15, travelCost = 3
+      // Expected U = 600 - 1.5 * 200 + 12 * 8 - 15 * 3 = 600 - 300 + 96 - 45 = 351
+      const utility = calculateFrontierUtility({
+        travelCost: 3,
+        price: 200,
+        quality: 8,
+        V: 600,
+        beta: 1.5,
+        gamma: 12,
+        alpha: 15,
+      });
+
+      expect(utility).toBe(351);
+
+      // Travel cost = Infinity strictly yields -Infinity
+      const unreachableUtility = calculateFrontierUtility({
+        travelCost: Infinity,
+        price: 200,
+        quality: 8,
+        V: 600,
+        beta: 1.5,
+        gamma: 12,
+        alpha: 15,
+      });
+      expect(unreachableUtility).toBe(-Infinity);
+
+      // Rejects negative beta or non-numeric beta
+      expect(() =>
+        calculateFrontierUtility({
+          travelCost: 0,
+          price: 200,
+          beta: -0.5,
+        })
+      ).toThrow(RangeError);
+
+      expect(() =>
+        calculateFrontierUtility({
+          travelCost: 0,
+          price: 200,
+          beta: '1.5',
+        })
+      ).toThrow(TypeError);
+    });
+
+    it('proves behavioral sensitivity: increasing beta, gamma, alpha increases respective sensitivity', () => {
+      // 1. Beta sensitivity (price):
+      // Restaurant 1 price 200 vs Restaurant 2 price 250 (gap = 50)
+      const uLowBeta1 = calculateFrontierUtility({ travelCost: 0, price: 200, beta: 1 });
+      const uLowBeta2 = calculateFrontierUtility({ travelCost: 0, price: 250, beta: 1 });
+      const gapLowBeta = uLowBeta1 - uLowBeta2; // 50
+
+      const uHighBeta1 = calculateFrontierUtility({ travelCost: 0, price: 200, beta: 3 });
+      const uHighBeta2 = calculateFrontierUtility({ travelCost: 0, price: 250, beta: 3 });
+      const gapHighBeta = uHighBeta1 - uHighBeta2; // 150
+
+      expect(gapHighBeta).toBeGreaterThan(gapLowBeta);
+      expect(gapHighBeta).toBe(150);
+
+      // 2. Gamma sensitivity (quality):
+      // Quality 4 vs Quality 8 (gap = 4)
+      const uLowGamma1 = calculateFrontierUtility({ travelCost: 0, price: 200, quality: 4, gamma: 5 });
+      const uLowGamma2 = calculateFrontierUtility({ travelCost: 0, price: 200, quality: 8, gamma: 5 });
+      const gapLowGamma = uLowGamma2 - uLowGamma1; // 20
+
+      const uHighGamma1 = calculateFrontierUtility({ travelCost: 0, price: 200, quality: 4, gamma: 25 });
+      const uHighGamma2 = calculateFrontierUtility({ travelCost: 0, price: 200, quality: 8, gamma: 25 });
+      const gapHighGamma = uHighGamma2 - uHighGamma1; // 100
+
+      expect(gapHighGamma).toBeGreaterThan(gapLowGamma);
+      expect(gapHighGamma).toBe(100);
+
+      // 3. Alpha sensitivity (travel friction):
+      // Distance 1 vs Distance 5 (gap = 4)
+      const uLowAlpha1 = calculateFrontierUtility({ travelCost: 1, price: 200, alpha: 5 });
+      const uLowAlpha2 = calculateFrontierUtility({ travelCost: 5, price: 200, alpha: 5 });
+      const gapLowAlpha = uLowAlpha1 - uLowAlpha2; // 20
+
+      const uHighAlpha1 = calculateFrontierUtility({ travelCost: 1, price: 200, alpha: 25 });
+      const uHighAlpha2 = calculateFrontierUtility({ travelCost: 5, price: 200, alpha: 25 });
+      const gapHighAlpha = uHighAlpha1 - uHighAlpha2; // 100
+
+      expect(gapHighAlpha).toBeGreaterThan(gapLowAlpha);
+      expect(gapHighAlpha).toBe(100);
+    });
+
+    it('preserves exact backward compatibility when no segments are supplied', () => {
+      const restaurantA = { id: 'A', location: { x: 3, y: 3 }, price: 200, quality: 7 };
+      const restaurantB = { id: 'B', location: { x: 7, y: 7 }, price: 250, quality: 9 };
+
+      // Implicit default segments
+      const defaultMarket = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+      });
+
+      // Explicit single default segment
+      const explicitMarket = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+        segments: [DEFAULT_CONSUMER_SEGMENT],
+      });
+
+      expect(defaultMarket.restaurantDemand).toEqual(explicitMarket.restaurantDemand);
+      expect(defaultMarket.marketShares).toEqual(explicitMarket.marketShares);
+      expect(defaultMarket.reachableMarketShares).toEqual(explicitMarket.reachableMarketShares);
+      expect(defaultMarket.totalPopulation).toBe(explicitMarket.totalPopulation);
+      expect(defaultMarket.reachablePopulation).toBe(explicitMarket.reachablePopulation);
+      expect(defaultMarket.unreachablePopulation).toBe(explicitMarket.unreachablePopulation);
+
+      // Verify segments metadata on market output
+      expect(defaultMarket.segments).toHaveLength(1);
+      expect(defaultMarket.segments[0].id).toBe('general');
+      expect(defaultMarket.segmentDemand.general).toEqual(defaultMarket.restaurantDemand);
+      expect(defaultMarket.segmentResults.general.population).toBe(defaultMarket.totalPopulation);
+    });
+
+    it('rejects invalid segment definitions through calculateFrontierMarket', () => {
+      const rA = { id: 'A', location: { x: 0, y: 0 }, price: 200 };
+      const rB = { id: 'B', location: { x: 5, y: 5 }, price: 200 };
+
+      // Empty segments array
+      expect(() =>
+        calculateFrontierMarket({
+          city: balancedCity,
+          restaurantA: rA,
+          restaurantB: rB,
+          segments: [],
+        })
+      ).toThrow(RangeError);
+
+      // Non-array segments
+      expect(() =>
+        calculateFrontierMarket({
+          city: balancedCity,
+          restaurantA: rA,
+          restaurantB: rB,
+          segments: { notAnArray: true },
+        })
+      ).toThrow(TypeError);
+
+      // Duplicate segment IDs
+      expect(() =>
+        calculateFrontierMarket({
+          city: balancedCity,
+          restaurantA: rA,
+          restaurantB: rB,
+          segments: [
+            createConsumerSegment({ id: 'dupe', populationShare: 0.5 }),
+            createConsumerSegment({ id: 'dupe', populationShare: 0.5 }),
+          ],
+        })
+      ).toThrow(RangeError);
+
+      // Population shares not summing to 1.0
+      expect(() =>
+        calculateFrontierMarket({
+          city: balancedCity,
+          restaurantA: rA,
+          restaurantB: rB,
+          segments: [
+            createConsumerSegment({ id: 's1', populationShare: 0.3 }),
+            createConsumerSegment({ id: 's2', populationShare: 0.3 }),
+          ],
+        })
+      ).toThrow(RangeError);
+
+      // Negative preference parameter in segment
+      expect(() =>
+        calculateFrontierMarket({
+          city: balancedCity,
+          restaurantA: rA,
+          restaurantB: rB,
+          segments: [
+            { id: 's1', name: 'S1', populationShare: 1.0, V: 500, beta: -1, gamma: 10, alpha: 10 },
+          ],
+        })
+      ).toThrow(RangeError);
+    });
+
+    it('proves core requirement: different consumer segments make different choices in the same zone', () => {
+      // Co-located restaurants at (4, 4)
+      // Restaurant A: Budget option (price = 150, quality = 3)
+      // Restaurant B: Premium option (price = 300, quality = 10)
+      // Difference in price: PA - PB = -150 (A is cheaper by 150)
+      // Difference in quality: QA - QB = -7 (B is higher quality by 7)
+      const restaurantA = { id: 'A', location: { x: 4, y: 4 }, price: 150, quality: 3 };
+      const restaurantB = { id: 'B', location: { x: 4, y: 4 }, price: 300, quality: 10 };
+
+      // Segment 1: Budget Seekers (beta = 2.0, gamma = 5)
+      // UA - UB = -2(150 - 300) + 5(3 - 10) = +300 - 35 = +265 -> prefers A
+      const budgetSegment = createConsumerSegment({
+        id: 'budget',
+        name: 'Budget Seekers',
+        populationShare: 0.6,
+        V: 500,
+        beta: 2.0,
+        gamma: 5,
+        alpha: 10,
+      });
+
+      // Segment 2: Quality Seekers (beta = 0.5, gamma = 25)
+      // UA - UB = -0.5(150 - 300) + 25(3 - 10) = +75 - 175 = -100 -> prefers B
+      const qualitySegment = createConsumerSegment({
+        id: 'quality',
+        name: 'Quality Seekers',
+        populationShare: 0.4,
+        V: 500,
+        beta: 0.5,
+        gamma: 25,
+        alpha: 10,
+      });
+
+      const zoneAllocation = allocateFrontierDemand({
+        zone: { x: 4, y: 4, population: 100 },
+        restaurantA,
+        restaurantB,
+        segments: [budgetSegment, qualitySegment],
+      });
+
+      // Verify overall zone split
+      // Budget segment (60 pop) chooses A -> demandA = 60
+      // Quality segment (40 pop) chooses B -> demandB = 40
+      expect(zoneAllocation.population).toBe(100);
+      expect(zoneAllocation.demandA).toBe(60);
+      expect(zoneAllocation.demandB).toBe(40);
+      expect(zoneAllocation.shareA).toBeCloseTo(0.6, 5);
+      expect(zoneAllocation.shareB).toBeCloseTo(0.4, 5);
+      expect(zoneAllocation.choice).toBe('A'); // plurality winner
+
+      // Verify individual segment decisions within the zone
+      expect(zoneAllocation.segments).toHaveLength(2);
+
+      const [allocBudget, allocQuality] = zoneAllocation.segments;
+      expect(allocBudget.segmentId).toBe('budget');
+      expect(allocBudget.choice).toBe('A');
+      expect(allocBudget.demandA).toBe(60);
+      expect(allocBudget.demandB).toBe(0);
+      expect(allocBudget.shareA).toBe(1.0);
+      expect(allocBudget.shareB).toBe(0.0);
+      expect(allocBudget.utilityA).toBe(500 - 2 * 150 + 5 * 3); // 215
+      expect(allocBudget.utilityB).toBe(500 - 2 * 300 + 5 * 10); // -50
+
+      expect(allocQuality.segmentId).toBe('quality');
+      expect(allocQuality.choice).toBe('B');
+      expect(allocQuality.demandA).toBe(0);
+      expect(allocQuality.demandB).toBe(40);
+      expect(allocQuality.shareA).toBe(0.0);
+      expect(allocQuality.shareB).toBe(1.0);
+      expect(allocQuality.utilityA).toBe(500 - 0.5 * 150 + 25 * 3); // 500
+      expect(allocQuality.utilityB).toBe(500 - 0.5 * 300 + 25 * 10); // 600
+    });
+
+    it('proves convenience-sensitive consumers choose the closer restaurant despite lower quality and higher price', () => {
+      // Zone at (1, 1)
+      // Restaurant A at (1, 1): Distance = 0, Price = 250, Quality = 4
+      // Restaurant B at (7, 7): Distance = sqrt(72) ~ 8.485, Price = 200, Quality = 8
+      const restaurantA = { id: 'A', location: { x: 1, y: 1 }, price: 250, quality: 4 };
+      const restaurantB = { id: 'B', location: { x: 7, y: 7 }, price: 200, quality: 8 };
+
+      // Convenience seekers: high alpha = 40, beta = 1, gamma = 5
+      // UA = 500 - 250 + 5*4 - 40*0 = 270
+      // UB = 500 - 200 + 5*8 - 40*8.485 = 340 - 339.41 = 0.59 -> chooses A
+      const convenienceSegment = createConsumerSegment({
+        id: 'convenience',
+        name: 'Convenience Seekers',
+        populationShare: 0.5,
+        alpha: 40,
+        beta: 1.0,
+        gamma: 5,
+      });
+
+      // Quality seekers: alpha = 2, beta = 1, gamma = 20
+      // UA = 500 - 250 + 20*4 - 2*0 = 330
+      // UB = 500 - 200 + 20*8 - 2*8.485 = 460 - 16.97 = 443.03 -> chooses B
+      const qualitySegment = createConsumerSegment({
+        id: 'quality',
+        name: 'Quality Seekers',
+        populationShare: 0.5,
+        alpha: 2,
+        beta: 1.0,
+        gamma: 20,
+      });
+
+      const alloc = allocateFrontierDemand({
+        zone: { x: 1, y: 1, population: 200 },
+        restaurantA,
+        restaurantB,
+        mode: TRAVEL_COST_MODES.EUCLIDEAN,
+        segments: [convenienceSegment, qualitySegment],
+      });
+
+      expect(alloc.segments[0].choice).toBe('A');
+      expect(alloc.segments[0].demandA).toBe(100);
+      expect(alloc.segments[1].choice).toBe('B');
+      expect(alloc.segments[1].demandB).toBe(100);
+      expect(alloc.demandA).toBe(100);
+      expect(alloc.demandB).toBe(100);
+      expect(alloc.choice).toBe('TIE');
+    });
+
+    it('allocates 50/50 within a segment when utility is exactly tied, while another segment chooses decisively', () => {
+      // Co-located at (3, 3)
+      // Restaurant A: Price = 200, Quality = 10
+      // Restaurant B: Price = 150, Quality = 5
+      // Difference: PA - PB = 50, QA - QB = 5
+      const restaurantA = { id: 'A', location: { x: 3, y: 3 }, price: 200, quality: 10 };
+      const restaurantB = { id: 'B', location: { x: 3, y: 3 }, price: 150, quality: 5 };
+
+      // Segment 1 (Balanced): beta = 1, gamma = 10
+      // Delta U = -1*(50) + 10*(5) = -50 + 50 = 0 -> exact tie!
+      const balancedSeg = createConsumerSegment({
+        id: 'balanced',
+        populationShare: 0.5,
+        beta: 1,
+        gamma: 10,
+      });
+
+      // Segment 2 (Budget): beta = 2, gamma = 5
+      // Delta U = -2*(50) + 5*(5) = -100 + 25 = -75 -> strictly prefers B
+      const budgetSeg = createConsumerSegment({
+        id: 'budget',
+        populationShare: 0.5,
+        beta: 2,
+        gamma: 5,
+      });
+
+      const alloc = allocateFrontierDemand({
+        zone: { x: 3, y: 3, population: 100 },
+        restaurantA,
+        restaurantB,
+        segments: [balancedSeg, budgetSeg],
+      });
+
+      // Balanced: 50 pop splits 25 to A, 25 to B
+      expect(alloc.segments[0].choice).toBe('TIE');
+      expect(alloc.segments[0].demandA).toBe(25);
+      expect(alloc.segments[0].demandB).toBe(25);
+
+      // Budget: 50 pop all to B
+      expect(alloc.segments[1].choice).toBe('B');
+      expect(alloc.segments[1].demandA).toBe(0);
+      expect(alloc.segments[1].demandB).toBe(50);
+
+      // Total zone demand
+      expect(alloc.demandA).toBe(25);
+      expect(alloc.demandB).toBe(75);
+    });
+
+    it('handles unreachable restaurant topology correctly for all segments', () => {
+      const restaurantA = { id: 'A', location: { x: 0, y: 0 }, price: 200, quality: 5 };
+      const restaurantB = { id: 'B', location: { x: 9, y: 9 }, price: 200, quality: 10 };
+
+      const segments = [
+        createConsumerSegment({ id: 's1', populationShare: 0.4, beta: 2 }),
+        createConsumerSegment({ id: 's2', populationShare: 0.6, gamma: 25 }),
+      ];
+
+      // Disconnected: Only A reachable when travelCostB = Infinity
+      const choiceOnlyA = calculateZoneChoice({
+        travelCostA: 2,
+        travelCostB: Infinity,
+        priceA: restaurantA.price,
+        priceB: restaurantB.price,
+        qualityA: restaurantA.quality,
+        qualityB: restaurantB.quality,
+      });
+      expect(choiceOnlyA.choice).toBe('A');
+      expect(choiceOnlyA.shareA).toBe(1.0);
+      expect(choiceOnlyA.shareB).toBe(0.0);
+      expect(choiceOnlyA.utilityB).toBe(-Infinity);
+
+      // Verify allocateFrontierDemand with segments
+      const allocReachable = allocateFrontierDemand({
+        zone: { x: 5, y: 5, population: 100 },
+        restaurantA,
+        restaurantB,
+        mode: TRAVEL_COST_MODES.EUCLIDEAN,
+        segments,
+      });
+      expect(allocReachable.isReachable).toBe(true);
+      expect(allocReachable.demandA + allocReachable.demandB).toBe(100);
+
+      // Both unreachable
+      const choiceNeither = calculateZoneChoice({
+        travelCostA: Infinity,
+        travelCostB: Infinity,
+        priceA: restaurantA.price,
+        priceB: restaurantB.price,
+      });
+      expect(choiceNeither.choice).toBe('NONE');
+      expect(choiceNeither.shareA).toBe(0);
+      expect(choiceNeither.shareB).toBe(0);
+      expect(choiceNeither.isReachable).toBe(false);
+    });
+
+    it('strictly satisfies all conservation laws: zone, market, segment population, and demand conservation', () => {
+      const restaurantA = { id: 'A', location: { x: 2, y: 2 }, price: 200, quality: 7 };
+      const restaurantB = { id: 'B', location: { x: 7, y: 7 }, price: 250, quality: 9 };
+
+      const segments = [
+        createConsumerSegment({ id: 'budget', populationShare: 0.35, beta: 2.0, gamma: 5 }),
+        createConsumerSegment({ id: 'quality', populationShare: 0.40, beta: 0.8, gamma: 20 }),
+        createConsumerSegment({ id: 'convenience', populationShare: 0.25, alpha: 25 }),
+      ];
+
+      const market = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+        mode: TRAVEL_COST_MODES.ROAD,
+        roadNetwork: barrierNetwork,
+        segments,
+      });
+
+      // 1. Zone population conservation: Sum of segment populations equals cell population
+      // 2. Zone demand conservation: demandA + demandB equals reachable cell population
+      let sumZoneDemandsA = 0;
+      let sumZoneDemandsB = 0;
+
+      for (const alloc of market.zoneAllocations) {
+        let segPopSum = 0;
+        let segDemandSum = 0;
+        for (const seg of alloc.segments) {
+          segPopSum += seg.population;
+          segDemandSum += seg.demandA + seg.demandB;
+        }
+        expect(segPopSum).toBeCloseTo(alloc.population, 5);
+
+        if (alloc.isReachable) {
+          expect(alloc.demandA + alloc.demandB).toBeCloseTo(alloc.population, 5);
+          expect(segDemandSum).toBeCloseTo(alloc.population, 5);
+        } else {
+          expect(alloc.demandA).toBe(0);
+          expect(alloc.demandB).toBe(0);
+          expect(segDemandSum).toBe(0);
+        }
+
+        sumZoneDemandsA += alloc.demandA;
+        sumZoneDemandsB += alloc.demandB;
+      }
+
+      // 3. Market demand conservation: restaurantDemandA + restaurantDemandB equals reachablePopulation
+      expect(market.restaurantDemand.A).toBeCloseTo(sumZoneDemandsA, 5);
+      expect(market.restaurantDemand.B).toBeCloseTo(sumZoneDemandsB, 5);
+      expect(market.restaurantDemand.A + market.restaurantDemand.B).toBeCloseTo(
+        market.reachablePopulation,
+        5
+      );
+
+      // 4. Segment population conservation: Sum of segment populations equals totalPopulation
+      let totalSegPop = 0;
+      for (const segId of ['budget', 'quality', 'convenience']) {
+        totalSegPop += market.segmentResults[segId].population;
+      }
+      expect(totalSegPop).toBeCloseTo(market.totalPopulation, 5);
+
+      // 5. Segment demand conservation: Across segments and restaurants, total allocated equals reachable
+      let totalSegAllocated = 0;
+      for (const segId of ['budget', 'quality', 'convenience']) {
+        totalSegAllocated +=
+          market.segmentDemand[segId].A + market.segmentDemand[segId].B;
+      }
+      expect(totalSegAllocated).toBeCloseTo(market.reachablePopulation, 5);
+    });
+
+    it('works across different road network topologies and Euclidean mode', () => {
+      const restaurantA = { id: 'A', location: { x: 1, y: 5 }, price: 200, quality: 6 };
+      const restaurantB = { id: 'B', location: { x: 8, y: 5 }, price: 200, quality: 6 };
+
+      const segments = [
+        createConsumerSegment({ id: 's1', populationShare: 0.5, alpha: 5 }),
+        createConsumerSegment({ id: 's2', populationShare: 0.5, alpha: 25 }),
+      ];
+
+      // Euclidean mode
+      const euclideanMarket = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+        mode: TRAVEL_COST_MODES.EUCLIDEAN,
+        segments,
+      });
+      expect(euclideanMarket.travelCostMode).toBe(TRAVEL_COST_MODES.EUCLIDEAN);
+      expect(euclideanMarket.restaurantDemand.A).toBeGreaterThan(0);
+      expect(euclideanMarket.restaurantDemand.B).toBeGreaterThan(0);
+
+      // Bridge network
+      const bridgeMarket = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+        mode: TRAVEL_COST_MODES.ROAD,
+        roadNetwork: bridgeNetwork,
+        segments,
+      });
+      expect(bridgeMarket.travelCostMode).toBe(TRAVEL_COST_MODES.ROAD);
+      expect(bridgeMarket.reachablePopulation).toBe(bridgeMarket.totalPopulation);
+
+      // Bottleneck network
+      const bottleneckMarket = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+        mode: TRAVEL_COST_MODES.ROAD,
+        roadNetwork: bottleneckNetwork,
+        segments,
+      });
+      expect(bottleneckMarket.travelCostMode).toBe(TRAVEL_COST_MODES.ROAD);
+      expect(bottleneckMarket.restaurantDemand.A).toBeGreaterThan(0);
+    });
+
+    it('preserves determinism and immutability across repeated calculations', () => {
+      const restaurantA = { id: 'A', location: { x: 3, y: 3 }, price: 200, quality: 6 };
+      const restaurantB = { id: 'B', location: { x: 7, y: 7 }, price: 220, quality: 8 };
+
+      const segments = [
+        createConsumerSegment({ id: 'budget', populationShare: 0.5, beta: 2 }),
+        createConsumerSegment({ id: 'quality', populationShare: 0.5, gamma: 20 }),
+      ];
+
+      const input = {
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+        mode: TRAVEL_COST_MODES.ROAD,
+        roadNetwork: gridNetwork,
+        segments,
+      };
+
+      const citySnapshot = JSON.stringify(balancedCity.cells);
+      const rASnapshot = JSON.stringify(restaurantA);
+      const segSnapshot = JSON.stringify(segments);
+
+      const run1 = calculateFrontierMarket(input);
+      const run2 = calculateFrontierMarket(input);
+
+      // Inputs not mutated
+      expect(JSON.stringify(balancedCity.cells)).toBe(citySnapshot);
+      expect(JSON.stringify(restaurantA)).toBe(rASnapshot);
+      expect(JSON.stringify(segments)).toBe(segSnapshot);
+
+      // Output determinism
+      expect(JSON.stringify(run1)).toBe(JSON.stringify(run2));
+
+      // Immutability of returned objects
+      expect(Object.isFrozen(run1)).toBe(true);
+      expect(Object.isFrozen(run1.segmentDemand)).toBe(true);
+      expect(Object.isFrozen(run1.segmentResults)).toBe(true);
+      expect(Object.isFrozen(run1.segmentResults.budget)).toBe(true);
+      expect(Object.isFrozen(run1.zoneAllocations[0].segments)).toBe(true);
+      expect(Object.isFrozen(run1.zoneAllocations[0].segments[0])).toBe(true);
+    });
+
+    it('maintains compatibility with Phase 7A custom quality scale', () => {
+      const restaurantA = { id: 'A', location: { x: 4, y: 4 }, price: 200, quality: 18 };
+      const restaurantB = { id: 'B', location: { x: 4, y: 4 }, price: 200, quality: 12 };
+
+      const segments = [
+        createConsumerSegment({ id: 'q-high', populationShare: 0.5, gamma: 20 }),
+        createConsumerSegment({ id: 'q-low', populationShare: 0.5, gamma: 5 }),
+      ];
+
+      const market = calculateFrontierMarket({
+        city: balancedCity,
+        restaurantA,
+        restaurantB,
+        config: { qualityScale: { min: 0, max: 20 } },
+        segments,
+      });
+
+      expect(market.config.qualityScale).toEqual({ min: 0, max: 20 });
+      expect(market.restaurants[0].quality).toBe(18);
+      expect(market.restaurants[1].quality).toBe(12);
+      expect(market.restaurantDemand.A).toBe(market.totalPopulation);
+      expect(market.restaurantDemand.B).toBe(0);
+
+      // Value exceeding custom scale still rejected
+      expect(() =>
+        calculateFrontierMarket({
+          city: balancedCity,
+          restaurantA: { id: 'A', location: { x: 4, y: 4 }, price: 200, quality: 25 },
+          restaurantB,
+          config: { qualityScale: { min: 0, max: 20 } },
+          segments,
+        })
+      ).toThrow(RangeError);
+    });
+
+    it('rejects invalid frozen segment arrays in allocateFrontierDemand (validation boundary fix)', () => {
+      const restaurantA = { id: 'A', location: { x: 2, y: 2 }, price: 200, quality: 5 };
+      const restaurantB = { id: 'B', location: { x: 8, y: 8 }, price: 250, quality: 8 };
+      const zone = { x: 4, y: 4, population: 100 };
+
+      // 1. Frozen array containing invalid populationShare
+      expect(() => {
+        const invalidShareSegments = Object.freeze([
+          {
+            id: 'invalid-share',
+            name: 'Invalid Share',
+            populationShare: 2,
+            V: 500,
+            beta: 1,
+            gamma: 10,
+            alpha: 10,
+          },
+        ]);
+        allocateFrontierDemand({
+          zone,
+          restaurantA,
+          restaurantB,
+          segments: invalidShareSegments,
+        });
+      }).toThrow(RangeError);
+
+      // Verify createConsumerSegment rejects populationShare: 2
+      expect(() =>
+        createConsumerSegment({
+          id: 'invalid',
+          populationShare: 2,
+        })
+      ).toThrow(RangeError);
+
+      // Frozen array with shares not summing to 1.0
+      expect(() => {
+        const notSummingToOne = Object.freeze([
+          createConsumerSegment({ id: 's1', populationShare: 0.3 }),
+          createConsumerSegment({ id: 's2', populationShare: 0.3 }),
+        ]);
+        allocateFrontierDemand({
+          zone,
+          restaurantA,
+          restaurantB,
+          segments: notSummingToOne,
+        });
+      }).toThrow(RangeError);
+
+      // 2. Frozen array containing invalid preference parameters (e.g. beta: -1)
+      expect(() => {
+        const negativeBetaSegments = Object.freeze([
+          {
+            id: 'bad-beta',
+            name: 'Bad Beta',
+            populationShare: 1.0,
+            V: 500,
+            beta: -1,
+            gamma: 10,
+            alpha: 10,
+          },
+        ]);
+        allocateFrontierDemand({
+          zone,
+          restaurantA,
+          restaurantB,
+          segments: negativeBetaSegments,
+        });
+      }).toThrow(RangeError);
+
+      // e.g. V: NaN or negative
+      expect(() => {
+        const badVSegments = Object.freeze([
+          {
+            id: 'bad-v',
+            name: 'Bad V',
+            populationShare: 1.0,
+            V: NaN,
+            beta: 1,
+            gamma: 10,
+            alpha: 10,
+          },
+        ]);
+        allocateFrontierDemand({
+          zone,
+          restaurantA,
+          restaurantB,
+          segments: badVSegments,
+        });
+      }).toThrow(TypeError);
+
+      // e.g. gamma: 'invalid'
+      expect(() => {
+        const badGammaSegments = Object.freeze([
+          {
+            id: 'bad-gamma',
+            name: 'Bad Gamma',
+            populationShare: 1.0,
+            V: 500,
+            beta: 1,
+            gamma: 'invalid',
+            alpha: 10,
+          },
+        ]);
+        allocateFrontierDemand({
+          zone,
+          restaurantA,
+          restaurantB,
+          segments: badGammaSegments,
+        });
+      }).toThrow(TypeError);
+
+      // e.g. alpha: Infinity
+      expect(() => {
+        const badAlphaSegments = Object.freeze([
+          {
+            id: 'bad-alpha',
+            name: 'Bad Alpha',
+            populationShare: 1.0,
+            V: 500,
+            beta: 1,
+            gamma: 10,
+            alpha: Infinity,
+          },
+        ]);
+        allocateFrontierDemand({
+          zone,
+          restaurantA,
+          restaurantB,
+          segments: badAlphaSegments,
+        });
+      }).toThrow(TypeError);
+
+      // 3. Frozen array with duplicate IDs
+      expect(() => {
+        const duplicateIdSegments = Object.freeze([
+          createConsumerSegment({
+            id: 'segment-a',
+            populationShare: 0.5,
+          }),
+          createConsumerSegment({
+            id: 'segment-a',
+            populationShare: 0.5,
+          }),
+        ]);
+        allocateFrontierDemand({
+          zone,
+          restaurantA,
+          restaurantB,
+          segments: duplicateIdSegments,
+        });
+      }).toThrow(RangeError);
+
+      // 4. Frozen valid segment array still works
+      const validFrozenSegments = Object.freeze([
+        createConsumerSegment({
+          id: 'seg-budget',
+          name: 'Budget',
+          populationShare: 0.6,
+          beta: 2.0,
+          gamma: 5,
+        }),
+        createConsumerSegment({
+          id: 'seg-quality',
+          name: 'Quality',
+          populationShare: 0.4,
+          beta: 0.5,
+          gamma: 25,
+        }),
+      ]);
+
+      const validAllocation = allocateFrontierDemand({
+        zone,
+        restaurantA,
+        restaurantB,
+        mode: TRAVEL_COST_MODES.EUCLIDEAN,
+        segments: validFrozenSegments,
+      });
+
+      expect(validAllocation.population).toBe(100);
+      expect(validAllocation.demandA + validAllocation.demandB).toBeCloseTo(100, 5);
+      expect(validAllocation.segments).toHaveLength(2);
+      expect(validAllocation.segments[0].segmentId).toBe('seg-budget');
+      expect(validAllocation.segments[1].segmentId).toBe('seg-quality');
+      expect(validAllocation.segments[0].population).toBeCloseTo(60, 5);
+      expect(validAllocation.segments[1].population).toBeCloseTo(40, 5);
+
+      // Also verify passing valid frozen segments via config.segments
+      const configAllocation = allocateFrontierDemand({
+        zone,
+        restaurantA,
+        restaurantB,
+        mode: TRAVEL_COST_MODES.EUCLIDEAN,
+        config: { segments: validFrozenSegments },
+      });
+      expect(configAllocation.demandA).toBe(validAllocation.demandA);
+      expect(configAllocation.demandB).toBe(validAllocation.demandB);
+    });
+  });
 });
+
+
 

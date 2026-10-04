@@ -156,6 +156,7 @@ export function calculateFrontierPayoff(options = {}) {
     mode = TRAVEL_COST_MODES.EUCLIDEAN,
     roadNetwork,
     config = DEFAULT_PARAMS,
+    segments,
     variableCost = DEFAULT_VARIABLE_COST,
     fixedCost = DEFAULT_FIXED_COST,
     variableCostA,
@@ -175,6 +176,7 @@ export function calculateFrontierPayoff(options = {}) {
     mode,
     roadNetwork,
     config,
+    segments,
     tolerance,
   });
 

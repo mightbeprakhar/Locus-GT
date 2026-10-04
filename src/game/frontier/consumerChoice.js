@@ -1,39 +1,59 @@
 /**
  * @file consumerChoice.js
- * @description Frontier consumer-choice and demand allocation engine with quality differentiation (Phase 7A).
+ * @description Frontier consumer-choice and demand allocation engine with heterogeneous consumer preferences (Phase 7B).
  *
  * Architecture:
  *   Frontier City (Urban Geography & Effective Population)
  *        ↓
  *   Road Network & Travel Cost (Euclidean / Dijkstra Shortest Path)
  *        ↓
- *   Consumer Utility & Zone Choice (Deterministic Utility Comparison)
+ *   Consumer Preferences & Segments (Heterogeneous Valuation, Price, Quality, Travel Sensitivities)
  *        ↓
- *   Restaurant Demand & Market Share
+ *   Segment-Specific Consumer Utility & Zone Choice (Deterministic Utility Comparison)
+ *        ↓
+ *   Segment Demand & Aggregate Restaurant Demand
+ *        ↓
+ *   Market Shares & Firm Payoffs
  *
  * Mathematical Model:
- * For consumer zone i and restaurant j:
- *   U_ij = V - P_j + gamma * Q_j - alpha * T_ij
+ * For consumer zone i, restaurant j, and consumer segment k:
+ *   U_ij^(k) = V_k - beta_k * P_j + gamma_k * Q_j - alpha_k * T_ij
  *
  * Parameters:
- *   V     = baseline consumer reservation valuation
- *   P_j   = price charged by restaurant j
- *   Q_j   = restaurant quality level
- *   gamma = consumer sensitivity to quality (marginal utility per quality unit)
- *   alpha = travel friction sensitivity
- *   T_ij  = spatial travel cost between consumer zone i and restaurant j
+ *   k        = consumer segment identifier
+ *   V_k      = segment baseline consumer reservation valuation (>= 0)
+ *   beta_k   = segment price sensitivity (>= 0)
+ *   P_j      = price charged by restaurant j
+ *   gamma_k  = segment quality sensitivity (>= 0)
+ *   Q_j      = restaurant quality level
+ *   alpha_k  = segment travel friction sensitivity (>= 0)
+ *   T_ij     = spatial travel cost between consumer zone i and restaurant j
  *
- * Quality Impact:
- *   Quality affects demand through consumer utility U_ij, expanding market share
- *   and customer demand rather than entering firm payoff equations directly.
+ * Heterogeneous Preferences:
+ *   Different consumer segments (e.g. Budget Seekers, Quality Seekers, Convenience Seekers)
+ *   can make distinct choices between the same two competing restaurants in the same zone.
+ *   For every zone i and segment k:
+ *     segmentPopulation_ik = zonePopulation_i * populationShare_k
+ *   Allocations are strictly deterministic; no random sampling or Monte Carlo simulation occurs.
  *
- * Decision Rule:
- *   utilityA > utilityB  => shareA = 1, shareB = 0
- *   utilityB > utilityA  => shareA = 0, shareB = 1
- *   utilityA === utilityB (within float tolerance) => shareA = 0.5, shareB = 0.5
+ * Decision Rule (per segment k):
+ *   U_iA^(k) > U_iB^(k)  => shareA = 1, shareB = 0
+ *   U_iB^(k) > U_iA^(k)  => shareA = 0, shareB = 1
+ *   |U_iA^(k) - U_iB^(k)| <= tolerance => shareA = 0.5, shareB = 0.5
+ *
+ * Aggregate Zone Semantics vs. Segment-Level Decisions:
+ *   With heterogeneous consumer segments, the authoritative behavioral decisions reside at
+ *   the segment level (segment -> utility -> choice -> demand, recorded in zoneAllocation.segments).
+ *   Aggregate zone-level fields provide summary metrics:
+ *     - utilityA / utilityB: When the restaurant is reachable, utilityA / utilityB are population-weighted
+ *       aggregate summary utilities across consumer segments. When a restaurant is unreachable,
+ *       its aggregate utility is -Infinity, preserving the engine's explicit unreachable semantics.
+ *     - choice: Aggregate zone demand outcome ('A', 'B', 'TIE', 'NONE') reflecting which
+ *       restaurant captures the majority/plurality of demand from this zone. It must NOT be
+ *       interpreted as unanimous consumer choice.
  *
  * Disconnected Topology / Unreachable Zones:
- *   Unreachable restaurants (T_ij = Infinity) strictly yield U_ij = -Infinity.
+ *   Unreachable restaurants (T_ij = Infinity) strictly yield U_ij^(k) = -Infinity.
  *   Both restaurants unreachable (T_iA = Infinity, T_iB = Infinity)
  *     => shareA = 0, shareB = 0 (contributes to unreachablePopulation)
  *   Only A reachable (T_iA < Infinity, T_iB = Infinity)
@@ -52,6 +72,11 @@ import {
   validateFrontierQuality,
   validateQualityConfig,
 } from './quality.js';
+import {
+  DEFAULT_BETA,
+  getDefaultConsumerSegments,
+  validateConsumerSegments,
+} from './consumerSegments.js';
 
 /**
  * Validates and normalizes an input restaurant object.
@@ -60,7 +85,8 @@ import {
  * @param {string} label - Identifier for error reporting ('A' or 'B')
  * @param {number} width - Grid width
  * @param {number} height - Grid height
- * @returns {Readonly<{ id: string, location: { x: number, y: number }, price: number }>}
+ * @param {Object} [qualityScale=DEFAULT_QUALITY_SCALE] - Configured quality scale bounds
+ * @returns {Readonly<{ id: string, location: { x: number, y: number }, price: number, quality: number }>}
  */
 function validateRestaurant(
   r,
@@ -167,9 +193,9 @@ function extractRestaurants(options, width, height, qualityScale = DEFAULT_QUALI
 }
 
 /**
- * Calculates consumer utility U_ij for a given travel distance, price, and quality.
+ * Calculates consumer utility U_ij for a given travel distance, price, quality, and sensitivities.
  *
- *   U_ij = V - P_j + gamma * Q_j - alpha * T_ij
+ *   U_ij = V - beta * P_j + gamma * Q_j - alpha * T_ij
  *
  * @param {Object} params
  * @param {number} params.travelCost - Travel distance / friction (T_ij)
@@ -178,6 +204,7 @@ function extractRestaurants(options, width, height, qualityScale = DEFAULT_QUALI
  * @param {number} [params.V=DEFAULT_PARAMS.V] - Baseline consumer valuation
  * @param {number} [params.alpha=DEFAULT_PARAMS.alpha] - Travel sensitivity factor
  * @param {number} [params.gamma=DEFAULT_GAMMA] - Quality sensitivity factor
+ * @param {number} [params.beta=DEFAULT_BETA] - Price sensitivity factor
  * @param {Object} [params.qualityScale=DEFAULT_QUALITY_SCALE] - Configured quality scale bounds
  * @returns {number} Calculated utility (or -Infinity if unreachable)
  */
@@ -188,6 +215,7 @@ export function calculateFrontierUtility({
   V = DEFAULT_PARAMS.V,
   alpha = DEFAULT_PARAMS.alpha,
   gamma = DEFAULT_GAMMA,
+  beta = DEFAULT_BETA,
   qualityScale = DEFAULT_QUALITY_SCALE,
 }) {
   if (typeof price !== 'number' || !Number.isFinite(price)) {
@@ -215,12 +243,18 @@ export function calculateFrontierUtility({
   ) {
     throw new TypeError('calculateFrontierUtility requires finite V, alpha, and gamma values.');
   }
+  if (typeof beta !== 'number' || !Number.isFinite(beta)) {
+    throw new TypeError('calculateFrontierUtility requires a finite beta value.');
+  }
+  if (beta < 0) {
+    throw new RangeError(`calculateFrontierUtility beta must be non-negative, received ${beta}.`);
+  }
 
   if (travelCost === Infinity) {
     return -Infinity;
   }
 
-  return V - price + gamma * quality - alpha * travelCost;
+  return V - beta * price + gamma * quality - alpha * travelCost;
 }
 
 /**
@@ -236,6 +270,7 @@ export function calculateFrontierUtility({
  * @param {number} [params.V=DEFAULT_PARAMS.V] - Reservation valuation
  * @param {number} [params.alpha=DEFAULT_PARAMS.alpha] - Travel sensitivity
  * @param {number} [params.gamma=DEFAULT_GAMMA] - Quality sensitivity factor
+ * @param {number} [params.beta=DEFAULT_BETA] - Price sensitivity factor
  * @param {Object} [params.qualityScale=DEFAULT_QUALITY_SCALE] - Configured quality scale bounds
  * @param {number} [params.tolerance=FLOAT_EPSILON] - Numerical tie tolerance
  * @returns {Readonly<{
@@ -261,6 +296,7 @@ export function calculateZoneChoice({
   V = DEFAULT_PARAMS.V,
   alpha = DEFAULT_PARAMS.alpha,
   gamma = DEFAULT_GAMMA,
+  beta = DEFAULT_BETA,
   qualityScale = DEFAULT_QUALITY_SCALE,
   tolerance = FLOAT_EPSILON,
 }) {
@@ -271,6 +307,7 @@ export function calculateZoneChoice({
     V,
     alpha,
     gamma,
+    beta,
     qualityScale,
   });
   const utilityB = calculateFrontierUtility({
@@ -280,6 +317,7 @@ export function calculateZoneChoice({
     V,
     alpha,
     gamma,
+    beta,
     qualityScale,
   });
 
@@ -380,54 +418,49 @@ export function calculateZoneChoice({
 }
 
 /**
- * Computes travel costs, utilities, shares, and demand allocation for a single population zone.
+ * Internal allocation helper for computing zone-level demand across already-validated segments.
  *
+ * @private
  * @param {Object} params
- * @param {{x: number, y: number, zoneType?: string}} params.zone - Zone location coordinates
- * @param {number} [params.population] - Zone effective population (defaults to zone.population)
- * @param {Object} params.restaurantA - Restaurant A definition
- * @param {Object} params.restaurantB - Restaurant B definition
- * @param {'euclidean'|'road'} [params.mode=TRAVEL_COST_MODES.EUCLIDEAN] - Travel cost mode
- * @param {Object} [params.roadNetwork] - Required when mode is 'road'
- * @param {{V?: number, alpha?: number, gamma?: number, qualityScale?: { min?: number, max?: number }}} [params.config=DEFAULT_PARAMS]
+ * @param {{x: number, y: number, zoneType?: string, population?: number}} params.zone
+ * @param {number} params.effectivePop
+ * @param {Object} params.restaurantA
+ * @param {Object} params.restaurantB
+ * @param {'euclidean'|'road'} params.mode
+ * @param {Object} [params.roadNetwork]
+ * @param {Object} [params.qualityScale=DEFAULT_QUALITY_SCALE]
+ * @param {ReadonlyArray<Object>} params.normalizedSegments
  * @param {number} [params.tolerance=FLOAT_EPSILON]
  * @returns {Readonly<{
  *   zone: { x: number, y: number },
  *   population: number,
  *   travelCostA: number,
  *   travelCostB: number,
- *   utilityA: number,
- *   utilityB: number,
+ *   utilityA: number, // Population-weighted aggregate summary utility across segments when reachable, or -Infinity if unreachable
+ *   utilityB: number, // Population-weighted aggregate summary utility across segments when reachable, or -Infinity if unreachable
  *   qualityA: number,
  *   qualityB: number,
  *   shareA: number,
  *   shareB: number,
  *   demandA: number,
  *   demandB: number,
- *   choice: 'A'|'B'|'TIE'|'NONE',
+ *   choice: 'A'|'B'|'TIE'|'NONE', // Aggregate demand outcome; not unanimous consumer choice
  *   isReachable: boolean,
+ *   segments: Array<Object>, // Authoritative behavioral data: segment -> utility -> choice -> demand
  *   zoneType?: string
  * }>}
  */
-export function allocateFrontierDemand({
+function internalAllocateFrontierDemand({
   zone,
-  population,
+  effectivePop,
   restaurantA,
   restaurantB,
-  mode = TRAVEL_COST_MODES.EUCLIDEAN,
+  mode,
   roadNetwork,
-  config = DEFAULT_PARAMS,
+  qualityScale = DEFAULT_QUALITY_SCALE,
+  normalizedSegments,
   tolerance = FLOAT_EPSILON,
 }) {
-  if (!zone || typeof zone !== 'object') {
-    throw new TypeError('allocateFrontierDemand requires a valid zone object.');
-  }
-
-  const effectivePop = population !== undefined ? population : zone.population;
-  if (typeof effectivePop !== 'number' || !Number.isFinite(effectivePop) || effectivePop < 0) {
-    throw new TypeError('allocateFrontierDemand requires a non-negative numeric population.');
-  }
-
   const fromPoint = { x: zone.x, y: zone.y };
 
   const travelCostA = getTravelCost({
@@ -446,47 +479,210 @@ export function allocateFrontierDemand({
 
   const qualityA = restaurantA.quality ?? DEFAULT_QUALITY;
   const qualityB = restaurantB.quality ?? DEFAULT_QUALITY;
-  const gamma = config?.gamma ?? DEFAULT_GAMMA;
-  const qualityScale = config?.qualityScale ?? DEFAULT_QUALITY_SCALE;
 
-  const choiceResult = calculateZoneChoice({
-    travelCostA,
-    travelCostB,
-    priceA: restaurantA.price,
-    priceB: restaurantB.price,
-    qualityA,
-    qualityB,
-    V: config?.V ?? DEFAULT_PARAMS.V,
-    alpha: config?.alpha ?? DEFAULT_PARAMS.alpha,
-    gamma,
-    qualityScale,
-    tolerance,
-  });
+  const aIsReachable = travelCostA < Infinity;
+  const bIsReachable = travelCostB < Infinity;
+  const isReachable = aIsReachable || bIsReachable;
 
-  const demandA = effectivePop * choiceResult.shareA;
-  const demandB = effectivePop * choiceResult.shareB;
+  let totalDemandA = 0;
+  let totalDemandB = 0;
+  const segmentAllocations = [];
+
+  for (let k = 0; k < normalizedSegments.length; k++) {
+    const seg = normalizedSegments[k];
+    const segPop = effectivePop * seg.populationShare;
+
+    const segChoice = calculateZoneChoice({
+      travelCostA,
+      travelCostB,
+      priceA: restaurantA.price,
+      priceB: restaurantB.price,
+      qualityA,
+      qualityB,
+      V: seg.V,
+      alpha: seg.alpha,
+      gamma: seg.gamma,
+      beta: seg.beta,
+      qualityScale,
+      tolerance,
+    });
+
+    const segDemandA = segPop * segChoice.shareA;
+    const segDemandB = segPop * segChoice.shareB;
+
+    totalDemandA += segDemandA;
+    totalDemandB += segDemandB;
+
+    segmentAllocations.push(
+      Object.freeze({
+        segmentId: seg.id,
+        segmentName: seg.name,
+        population: segPop,
+        travelCostA,
+        travelCostB,
+        travelCosts: Object.freeze({ A: travelCostA, B: travelCostB }),
+        utilityA: segChoice.utilityA,
+        utilityB: segChoice.utilityB,
+        utilities: Object.freeze({ A: segChoice.utilityA, B: segChoice.utilityB }),
+        shareA: segChoice.shareA,
+        shareB: segChoice.shareB,
+        shares: Object.freeze({ A: segChoice.shareA, B: segChoice.shareB }),
+        demandA: segDemandA,
+        demandB: segDemandB,
+        demand: Object.freeze({ A: segDemandA, B: segDemandB }),
+        choice: segChoice.choice,
+        isReachable: segChoice.isReachable,
+        reachable: segChoice.isReachable,
+      })
+    );
+  }
+
+  const shareA = effectivePop > 0 ? totalDemandA / effectivePop : 0;
+  const shareB = effectivePop > 0 ? totalDemandB / effectivePop : 0;
+
+  let choice;
+  if (!isReachable) {
+    choice = 'NONE';
+  } else if (aIsReachable && !bIsReachable) {
+    choice = 'A';
+  } else if (!aIsReachable && bIsReachable) {
+    choice = 'B';
+  } else {
+    const demandDiff = totalDemandA - totalDemandB;
+    if (Math.abs(demandDiff) <= tolerance * (effectivePop > 0 ? effectivePop : 1)) {
+      choice = 'TIE';
+    } else if (demandDiff > 0) {
+      choice = 'A';
+    } else {
+      choice = 'B';
+    }
+  }
+
+  let utilityA;
+  let utilityB;
+  if (normalizedSegments.length === 1) {
+    utilityA = segmentAllocations[0].utilityA;
+    utilityB = segmentAllocations[0].utilityB;
+  } else {
+    utilityA = aIsReachable
+      ? normalizedSegments.reduce((sum, seg, idx) => sum + seg.populationShare * segmentAllocations[idx].utilityA, 0)
+      : -Infinity;
+    utilityB = bIsReachable
+      ? normalizedSegments.reduce((sum, seg, idx) => sum + seg.populationShare * segmentAllocations[idx].utilityB, 0)
+      : -Infinity;
+  }
 
   return Object.freeze({
     zone: Object.freeze({ x: zone.x, y: zone.y }),
     population: effectivePop,
     travelCostA,
     travelCostB,
-    utilityA: choiceResult.utilityA,
-    utilityB: choiceResult.utilityB,
-    qualityA: choiceResult.qualityA,
-    qualityB: choiceResult.qualityB,
-    shareA: choiceResult.shareA,
-    shareB: choiceResult.shareB,
-    demandA,
-    demandB,
-    choice: choiceResult.choice,
-    isReachable: choiceResult.isReachable,
+    utilityA,
+    utilityB,
+    qualityA,
+    qualityB,
+    shareA,
+    shareB,
+    demandA: totalDemandA,
+    demandB: totalDemandB,
+    choice,
+    isReachable,
+    segments: Object.freeze(segmentAllocations),
     ...(zone.zoneType ? { zoneType: zone.zoneType } : {}),
   });
 }
 
 /**
- * Evaluates the full Frontier market demand and zone allocations for two competing restaurants.
+ * Computes travel costs, utilities, shares, and demand allocation for a single population zone
+ * across one or more heterogeneous consumer segments.
+ *
+ * NOTE ON AGGREGATE ZONE SEMANTICS:
+ * With heterogeneous consumer segments, authoritative behavioral decisions reside at the
+ * segment level (recorded in the `segments` array: segment -> utility -> choice -> demand).
+ * Aggregate zone-level fields provide summary metrics:
+ *   - `utilityA` / `utilityB`: When the restaurant is reachable, utilityA / utilityB are population-weighted
+ *     aggregate summary utilities across consumer segments. When a restaurant is unreachable,
+ *     its aggregate utility is -Infinity, preserving the engine's explicit unreachable semantics.
+ *   - `choice`: Aggregate zone demand outcome ('A', 'B', 'TIE', 'NONE') reflecting which
+ *     restaurant captures the majority/plurality of demand from this zone. It must NOT be
+ *     interpreted as unanimous consumer choice.
+ *
+ * Mathematical Model:
+ * For segment k:
+ *   U_ij^(k) = V_k - beta_k * P_j + gamma_k * Q_j - alpha_k * T_ij
+ *
+ * @param {Object} params
+ * @param {{x: number, y: number, zoneType?: string, population?: number}} params.zone - Zone location coordinates
+ * @param {number} [params.population] - Zone effective population (defaults to zone.population)
+ * @param {Object} params.restaurantA - Restaurant A definition
+ * @param {Object} params.restaurantB - Restaurant B definition
+ * @param {'euclidean'|'road'} [params.mode=TRAVEL_COST_MODES.EUCLIDEAN] - Travel cost mode
+ * @param {Object} [params.roadNetwork] - Required when mode is 'road'
+ * @param {{V?: number, alpha?: number, gamma?: number, qualityScale?: { min?: number, max?: number }, segments?: Array<Object>}} [params.config=DEFAULT_PARAMS]
+ * @param {Array<Object>} [params.segments] - Optional consumer segments override
+ * @param {number} [params.tolerance=FLOAT_EPSILON]
+ * @returns {Readonly<{
+ *   zone: { x: number, y: number },
+ *   population: number,
+ *   travelCostA: number,
+ *   travelCostB: number,
+ *   utilityA: number, // Population-weighted aggregate summary utility across segments when reachable, or -Infinity if unreachable
+ *   utilityB: number, // Population-weighted aggregate summary utility across segments when reachable, or -Infinity if unreachable
+ *   qualityA: number,
+ *   qualityB: number,
+ *   shareA: number,
+ *   shareB: number,
+ *   demandA: number,
+ *   demandB: number,
+ *   choice: 'A'|'B'|'TIE'|'NONE', // Aggregate demand outcome; not unanimous consumer choice
+ *   isReachable: boolean,
+ *   segments: Array<Object>, // Authoritative behavioral data: segment -> utility -> choice -> demand
+ *   zoneType?: string
+ * }>}
+ */
+export function allocateFrontierDemand({
+  zone,
+  population,
+  restaurantA,
+  restaurantB,
+  mode = TRAVEL_COST_MODES.EUCLIDEAN,
+  roadNetwork,
+  config = DEFAULT_PARAMS,
+  segments,
+  tolerance = FLOAT_EPSILON,
+}) {
+  if (!zone || typeof zone !== 'object') {
+    throw new TypeError('allocateFrontierDemand requires a valid zone object.');
+  }
+
+  const effectivePop = population !== undefined ? population : zone.population;
+  if (typeof effectivePop !== 'number' || !Number.isFinite(effectivePop) || effectivePop < 0) {
+    throw new TypeError('allocateFrontierDemand requires a non-negative numeric population.');
+  }
+
+  const rawSegments = segments ?? config?.segments;
+  const normalizedSegments = rawSegments !== undefined
+    ? validateConsumerSegments(rawSegments)
+    : getDefaultConsumerSegments(config);
+
+  const qualityScale = config?.qualityScale ?? DEFAULT_QUALITY_SCALE;
+
+  return internalAllocateFrontierDemand({
+    zone,
+    effectivePop,
+    restaurantA,
+    restaurantB,
+    mode,
+    roadNetwork,
+    qualityScale,
+    normalizedSegments,
+    tolerance,
+  });
+}
+
+/**
+ * Evaluates the full Frontier market demand and zone allocations for two competing restaurants
+ * under homogeneous or heterogeneous consumer preferences.
  *
  * @param {Object} options
  * @param {Object} options.city - Frontier city object containing `cells` array
@@ -495,18 +691,22 @@ export function allocateFrontierDemand({
  * @param {Array<Object>} [options.restaurants] - Alternative [rA, rB] array
  * @param {'euclidean'|'road'} [options.mode=TRAVEL_COST_MODES.EUCLIDEAN] - Travel cost mode
  * @param {Object} [options.roadNetwork] - Required when mode is 'road'
- * @param {{V?: number, alpha?: number, gamma?: number, qualityScale?: { min?: number, max?: number }}} [options.config=DEFAULT_PARAMS]
+ * @param {{V?: number, alpha?: number, gamma?: number, qualityScale?: { min?: number, max?: number }, segments?: Array<Object>}} [options.config=DEFAULT_PARAMS]
+ * @param {Array<Object>} [options.segments] - Optional consumer segments override
  * @param {number} [options.tolerance=FLOAT_EPSILON]
  * @returns {Readonly<{
  *   restaurantDemand: Record<string, number>,
  *   marketShares: Record<string, number>,
  *   reachableMarketShares: Record<string, number>,
- *   zoneAllocations: Array<Object>,
+ *   zoneAllocations: Array<Object>, // Zone allocations containing aggregate summary utilities (population-weighted when reachable, -Infinity when unreachable), aggregate demand outcome choice, and authoritative segment breakdown
  *   totalPopulation: number,
  *   reachablePopulation: number,
  *   unreachablePopulation: number,
  *   travelCostMode: string,
- *   config: { V: number, alpha: number, gamma: number, qualityScale: { min: number, max: number } },
+ *   config: Object,
+ *   segments: Array<Object>,
+ *   segmentDemand: Record<string, Record<string, number>>,
+ *   segmentResults: Record<string, Object>,
  *   restaurants: Array<{ id: string, location: { x: number, y: number }, price: number, quality: number }>
  * }>}
  */
@@ -545,14 +745,19 @@ export function calculateFrontierMarket(options = {}) {
     throw new TypeError('Road travel cost mode requires a valid roadNetwork object.');
   }
 
-  const width = city.width ?? DEFAULT_GRID.width;
-  const height = city.height ?? DEFAULT_GRID.height;
-
   const qualityConfig = validateQualityConfig({
     gamma: config?.gamma,
     qualityScale: config?.qualityScale,
   });
   const { gamma, qualityScale } = qualityConfig;
+
+  const rawSegments = options.segments ?? config?.segments;
+  const segments = rawSegments !== undefined
+    ? validateConsumerSegments(rawSegments)
+    : getDefaultConsumerSegments(config);
+
+  const width = city.width ?? DEFAULT_GRID.width;
+  const height = city.height ?? DEFAULT_GRID.height;
 
   const [restaurantA, restaurantB] = extractRestaurants(options, width, height, qualityScale);
 
@@ -564,7 +769,19 @@ export function calculateFrontierMarket(options = {}) {
     alpha,
     gamma,
     qualityScale,
+    segments,
   });
+
+  const idA = restaurantA.id;
+  const idB = restaurantB.id;
+
+  const segmentDemandTotals = {};
+  const segmentPopulationTotals = {};
+  for (let k = 0; k < segments.length; k++) {
+    const segId = segments[k].id;
+    segmentDemandTotals[segId] = { [idA]: 0, [idB]: 0 };
+    segmentPopulationTotals[segId] = 0;
+  }
 
   const cells = city.cells;
   const zoneAllocations = [];
@@ -579,14 +796,15 @@ export function calculateFrontierMarket(options = {}) {
     const pop = cell.population;
     totalPopulation += pop;
 
-    const allocation = allocateFrontierDemand({
+    const allocation = internalAllocateFrontierDemand({
       zone: cell,
-      population: pop,
+      effectivePop: pop,
       restaurantA,
       restaurantB,
       mode,
       roadNetwork,
-      config: marketConfig,
+      qualityScale,
+      normalizedSegments: segments,
       tolerance,
     });
 
@@ -600,10 +818,15 @@ export function calculateFrontierMarket(options = {}) {
 
     demandA += allocation.demandA;
     demandB += allocation.demandB;
-  }
 
-  const idA = restaurantA.id;
-  const idB = restaurantB.id;
+    for (let k = 0; k < allocation.segments.length; k++) {
+      const segAlloc = allocation.segments[k];
+      const segId = segAlloc.segmentId;
+      segmentPopulationTotals[segId] += segAlloc.population;
+      segmentDemandTotals[segId][idA] += segAlloc.demandA;
+      segmentDemandTotals[segId][idB] += segAlloc.demandB;
+    }
+  }
 
   const restaurantDemand = {
     [idA]: demandA,
@@ -620,6 +843,35 @@ export function calculateFrontierMarket(options = {}) {
     [idB]: reachablePopulation > 0 ? demandB / reachablePopulation : 0,
   };
 
+  const frozenSegmentDemand = {};
+  const frozenSegmentResults = {};
+  for (let k = 0; k < segments.length; k++) {
+    const seg = segments[k];
+    const segId = seg.id;
+    const segPop = segmentPopulationTotals[segId];
+    const demA = segmentDemandTotals[segId][idA];
+    const demB = segmentDemandTotals[segId][idB];
+
+    frozenSegmentDemand[segId] = Object.freeze({
+      [idA]: demA,
+      [idB]: demB,
+    });
+
+    frozenSegmentResults[segId] = Object.freeze({
+      segmentId: segId,
+      segmentName: seg.name,
+      population: segPop,
+      restaurantDemand: Object.freeze({
+        [idA]: demA,
+        [idB]: demB,
+      }),
+      marketShares: Object.freeze({
+        [idA]: segPop > 0 ? demA / segPop : 0,
+        [idB]: segPop > 0 ? demB / segPop : 0,
+      }),
+    });
+  }
+
   return Object.freeze({
     restaurantDemand: Object.freeze(restaurantDemand),
     marketShares: Object.freeze(marketShares),
@@ -630,9 +882,13 @@ export function calculateFrontierMarket(options = {}) {
     unreachablePopulation,
     travelCostMode: mode,
     config: marketConfig,
+    segments,
+    segmentDemand: Object.freeze(frozenSegmentDemand),
+    segmentResults: Object.freeze(frozenSegmentResults),
     restaurants: Object.freeze([
       Object.freeze({ ...restaurantA }),
       Object.freeze({ ...restaurantB }),
     ]),
   });
 }
+
