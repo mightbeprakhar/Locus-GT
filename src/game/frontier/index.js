@@ -11,3 +11,7 @@ export * from './shortestPath.js';
 export * from './travelCost.js';
 export * from './bottlenecks.js';
 export * from './consumerChoice.js';
+export * from './strategies.js';
+export * from './payoff.js';
+export * from './equilibrium.js';
+export * from './dynamics.js';
