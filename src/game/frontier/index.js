@@ -20,3 +20,4 @@ export * from './consumerSegments.js';
 export * from './strategicQuality.js';
 export * from './delivery.js';
 export * from './deliveryChoice.js';
+export * from './deliveryEconomics.js';
