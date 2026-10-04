@@ -17,3 +17,4 @@ export * from './equilibrium.js';
 export * from './dynamics.js';
 export * from './quality.js';
 export * from './consumerSegments.js';
+export * from './strategicQuality.js';
