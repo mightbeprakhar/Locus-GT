@@ -1,29 +1,35 @@
 /**
  * @file consumerSegments.js
- * @description Frontier heterogeneous consumer segment preferences and validation (Phase 7B).
+ * @description Frontier heterogeneous consumer segment preferences and validation (Phase 7B & Phase 8A).
  *
  * Mathematical Foundations:
  * Extended Frontier Consumer Utility for Segment k:
- *   U_ij^(k) = V_k - beta_k * P_j + gamma_k * Q_j - alpha_k * T_ij
+ *   Dine-In:
+ *     U_ij,D^(k) = V_k - beta_k * P_j + gamma_k * Q_j - alpha_k * T_ij
+ *   Delivery (Phase 8A):
+ *     U_ij,L^(k) = V_k - beta_k * (P_j + F_j) + gamma_k * Q_j - alpha_k * T_ij - delta_k * tau_ij
  *
  * where:
  *   k        = consumer segment identifier
  *   V_k      = segment baseline consumer reservation valuation (>= 0)
  *   beta_k   = segment price sensitivity (>= 0)
  *   P_j      = restaurant price
+ *   F_j      = restaurant delivery fee (>= 0)
  *   gamma_k  = segment quality sensitivity (>= 0)
  *   Q_j      = restaurant quality level
  *   alpha_k  = segment travel / spatial friction sensitivity (>= 0)
  *   T_ij     = spatial travel cost between consumer zone i and restaurant j
+ *   delta_k  = segment delivery-time sensitivity (>= 0)
+ *   tau_ij   = delivery duration = baseTime_j + timePerDistance_j * T_ij
  *
  * Economic Principles:
  * - Heterogeneous preferences allow different consumer groups to make different choices
- *   between the exact same pair of restaurants in the same city zone.
+ *   between the exact same pair of restaurants and service modes (dine-in vs delivery).
  * - Fractional deterministic population allocation:
  *     segmentPopulation_ik = zonePopulation_i * populationShare_k
  * - No random sampling or Monte Carlo simulation: all allocations are strictly deterministic.
- * - Quality and price affect firm profit strictly indirectly through consumer utility and aggregate demand.
- * - Spatial inaccessibility strictly dominates: if T_ij = Infinity, U_ij^(k) = -Infinity.
+ * - Quality, price, fees, and delivery time affect firm profit strictly indirectly through consumer utility and demand.
+ * - Spatial inaccessibility strictly dominates: if T_ij = Infinity, U_ij = -Infinity.
  */
 
 import { DEFAULT_PARAMS } from '../types.js';
@@ -34,6 +40,12 @@ import { DEFAULT_GAMMA } from './quality.js';
  * -1 price dollar yields -1 utility unit in canonical Hotelling models.
  */
 export const DEFAULT_BETA = 1;
+
+/**
+ * Default delivery-time sensitivity parameter (delta) (Phase 8A).
+ * Sensitivity to delivery duration tau_ij in consumer delivery utility.
+ */
+export const DEFAULT_DELTA = 1;
 
 /**
  * Numerical tolerance for population share summation validation.
@@ -51,6 +63,7 @@ export const DEFAULT_CONSUMER_SEGMENT = Object.freeze({
   beta: DEFAULT_BETA,
   gamma: DEFAULT_GAMMA,
   alpha: DEFAULT_PARAMS.alpha,
+  delta: DEFAULT_DELTA,
 });
 
 /**
@@ -81,6 +94,7 @@ export const CONSUMER_SEGMENT_PRESETS = Object.freeze({
     beta: 2.0,
     gamma: 5,
     alpha: 10,
+    delta: 1.0,
   }),
   [CONSUMER_SEGMENT_PRESET_IDS.QUALITY_SEEKERS]: Object.freeze({
     id: CONSUMER_SEGMENT_PRESET_IDS.QUALITY_SEEKERS,
@@ -90,6 +104,7 @@ export const CONSUMER_SEGMENT_PRESETS = Object.freeze({
     beta: 0.8,
     gamma: 25,
     alpha: 10,
+    delta: 1.0,
   }),
   [CONSUMER_SEGMENT_PRESET_IDS.CONVENIENCE_SEEKERS]: Object.freeze({
     id: CONSUMER_SEGMENT_PRESET_IDS.CONVENIENCE_SEEKERS,
@@ -99,6 +114,7 @@ export const CONSUMER_SEGMENT_PRESETS = Object.freeze({
     beta: 1.0,
     gamma: 10,
     alpha: 25,
+    delta: 2.5,
   }),
   [CONSUMER_SEGMENT_PRESET_IDS.BALANCED]: Object.freeze({
     id: CONSUMER_SEGMENT_PRESET_IDS.BALANCED,
@@ -108,6 +124,7 @@ export const CONSUMER_SEGMENT_PRESETS = Object.freeze({
     beta: 1.0,
     gamma: 10,
     alpha: 10,
+    delta: 1.0,
   }),
 });
 
@@ -124,6 +141,7 @@ export function validateConsumerSegment(segment) {
   }
 
   const { id, name, populationShare, V, beta, gamma, alpha } = segment;
+  const delta = segment.delta !== undefined ? segment.delta : DEFAULT_DELTA;
 
   if (typeof id !== 'string' || id.trim() === '') {
     throw new TypeError('Consumer segment must define a non-empty string "id".');
@@ -181,6 +199,16 @@ export function validateConsumerSegment(segment) {
     );
   }
 
+  if (typeof delta !== 'number' || !Number.isFinite(delta)) {
+    throw new TypeError(`Consumer segment "${id}" delivery-time sensitivity (delta) must be a finite number.`);
+  }
+
+  if (delta < 0) {
+    throw new RangeError(
+      `Consumer segment "${id}" delivery-time sensitivity (delta) must be non-negative, received ${delta}.`
+    );
+  }
+
   return true;
 }
 
@@ -195,6 +223,7 @@ export function validateConsumerSegment(segment) {
  * @param {number} [params.beta=DEFAULT_BETA] - Price sensitivity
  * @param {number} [params.gamma=DEFAULT_GAMMA] - Quality sensitivity
  * @param {number} [params.alpha=DEFAULT_PARAMS.alpha] - Travel sensitivity
+ * @param {number} [params.delta=DEFAULT_DELTA] - Delivery-time sensitivity
  * @returns {Readonly<{
  *   id: string,
  *   name: string,
@@ -202,7 +231,8 @@ export function validateConsumerSegment(segment) {
  *   V: number,
  *   beta: number,
  *   gamma: number,
- *   alpha: number
+ *   alpha: number,
+ *   delta: number
  * }>}
  */
 export function createConsumerSegment({
@@ -213,6 +243,7 @@ export function createConsumerSegment({
   beta = DEFAULT_BETA,
   gamma = DEFAULT_GAMMA,
   alpha = DEFAULT_PARAMS.alpha,
+  delta = DEFAULT_DELTA,
 }) {
   const candidate = {
     id,
@@ -222,6 +253,7 @@ export function createConsumerSegment({
     beta,
     gamma,
     alpha,
+    delta,
   };
 
   validateConsumerSegment(candidate);
@@ -234,12 +266,13 @@ export function createConsumerSegment({
     beta: candidate.beta,
     gamma: candidate.gamma,
     alpha: candidate.alpha,
+    delta: candidate.delta,
   });
 }
 
 /**
  * Creates the canonical default consumer segment, optionally inheriting parameter
- * overrides from a market configuration object (e.g. { V, alpha, gamma, beta }).
+ * overrides from a market configuration object (e.g. { V, alpha, gamma, beta, delta }).
  *
  * @param {Object} [config={}]
  * @returns {Readonly<{
@@ -249,7 +282,8 @@ export function createConsumerSegment({
  *   V: number,
  *   beta: number,
  *   gamma: number,
- *   alpha: number
+ *   alpha: number,
+ *   delta: number
  * }>}
  */
 export function createDefaultConsumerSegment(config = {}) {
@@ -257,6 +291,7 @@ export function createDefaultConsumerSegment(config = {}) {
   const beta = config?.beta ?? DEFAULT_BETA;
   const gamma = config?.gamma ?? DEFAULT_GAMMA;
   const alpha = config?.alpha ?? DEFAULT_PARAMS.alpha;
+  const delta = config?.delta ?? DEFAULT_DELTA;
 
   return createConsumerSegment({
     id: 'general',
@@ -266,6 +301,7 @@ export function createDefaultConsumerSegment(config = {}) {
     beta,
     gamma,
     alpha,
+    delta,
   });
 }
 
@@ -297,7 +333,8 @@ export function getDefaultConsumerSegments(config = {}) {
  *   V: number,
  *   beta: number,
  *   gamma: number,
- *   alpha: number
+ *   alpha: number,
+ *   delta: number
  * }>>} Frozen array of frozen normalized segments
  */
 export function validateConsumerSegments(segments) {
@@ -326,7 +363,7 @@ export function validateConsumerSegments(segments) {
     totalShare += raw.populationShare;
 
     normalized.push(
-      Object.isFrozen(raw)
+      Object.isFrozen(raw) && raw.delta !== undefined
         ? raw
         : Object.freeze({
             id,
@@ -336,6 +373,7 @@ export function validateConsumerSegments(segments) {
             beta: raw.beta,
             gamma: raw.gamma,
             alpha: raw.alpha,
+            delta: raw.delta !== undefined ? raw.delta : DEFAULT_DELTA,
           })
     );
   }

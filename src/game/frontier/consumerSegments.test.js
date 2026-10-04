@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_BETA,
+  DEFAULT_DELTA,
   SHARE_SUM_EPSILON,
   DEFAULT_CONSUMER_SEGMENT,
   DEFAULT_CONSUMER_SEGMENTS,
@@ -20,17 +21,21 @@ import {
   getConsumerSegmentPresets,
 } from './consumerSegments.js';
 
-describe('LOCUS Frontier Engine — Phase 7B: Consumer Segments Model', () => {
+describe('LOCUS Frontier Engine — Phase 7B & 8A: Consumer Segments Model', () => {
   describe('Canonical Constants', () => {
     it('defines standard default beta (price sensitivity) = 1', () => {
       expect(DEFAULT_BETA).toBe(1);
+    });
+
+    it('defines standard default delta (delivery-time sensitivity) = 1', () => {
+      expect(DEFAULT_DELTA).toBe(1);
     });
 
     it('defines share sum epsilon = 1e-6', () => {
       expect(SHARE_SUM_EPSILON).toBe(1e-6);
     });
 
-    it('defines canonical default homogeneous segment reproducing Phase 7A', () => {
+    it('defines canonical default homogeneous segment reproducing Phase 7A & 8A defaults', () => {
       expect(DEFAULT_CONSUMER_SEGMENT).toEqual({
         id: 'general',
         name: 'General Consumers',
@@ -39,6 +44,7 @@ describe('LOCUS Frontier Engine — Phase 7B: Consumer Segments Model', () => {
         beta: 1,
         gamma: 10,
         alpha: 10,
+        delta: 1,
       });
       expect(Object.isFrozen(DEFAULT_CONSUMER_SEGMENT)).toBe(true);
     });
@@ -49,7 +55,7 @@ describe('LOCUS Frontier Engine — Phase 7B: Consumer Segments Model', () => {
       expect(Object.isFrozen(DEFAULT_CONSUMER_SEGMENTS)).toBe(true);
     });
 
-    it('defines standard preset identifiers and preset library', () => {
+    it('defines standard preset identifiers and preset library with delivery sensitivity delta', () => {
       expect(CONSUMER_SEGMENT_PRESET_IDS).toEqual({
         BUDGET_SEEKERS: 'budget-seekers',
         QUALITY_SEEKERS: 'quality-seekers',
@@ -63,9 +69,13 @@ describe('LOCUS Frontier Engine — Phase 7B: Consumer Segments Model', () => {
       expect(Object.isFrozen(presets)).toBe(true);
 
       expect(presets[CONSUMER_SEGMENT_PRESET_IDS.BUDGET_SEEKERS].beta).toBeGreaterThan(1);
+      expect(presets[CONSUMER_SEGMENT_PRESET_IDS.BUDGET_SEEKERS].delta).toBe(1.0);
       expect(presets[CONSUMER_SEGMENT_PRESET_IDS.QUALITY_SEEKERS].gamma).toBeGreaterThan(10);
+      expect(presets[CONSUMER_SEGMENT_PRESET_IDS.QUALITY_SEEKERS].delta).toBe(1.0);
       expect(presets[CONSUMER_SEGMENT_PRESET_IDS.CONVENIENCE_SEEKERS].alpha).toBeGreaterThan(10);
+      expect(presets[CONSUMER_SEGMENT_PRESET_IDS.CONVENIENCE_SEEKERS].delta).toBe(2.5);
       expect(presets[CONSUMER_SEGMENT_PRESET_IDS.BALANCED].beta).toBe(1);
+      expect(presets[CONSUMER_SEGMENT_PRESET_IDS.BALANCED].delta).toBe(1.0);
     });
   });
 
@@ -123,11 +133,18 @@ describe('LOCUS Frontier Engine — Phase 7B: Consumer Segments Model', () => {
       // alpha
       expect(() => validateConsumerSegment({ id: 'a', name: 'A', populationShare: 1, V: 500, beta: 1, gamma: 10, alpha: null })).toThrow(TypeError);
       expect(() => validateConsumerSegment({ id: 'a', name: 'A', populationShare: 1, V: 500, beta: 1, gamma: 10, alpha: -0.5 })).toThrow(RangeError);
+
+      // delta
+      expect(() => validateConsumerSegment({ id: 'a', name: 'A', populationShare: 1, V: 500, beta: 1, gamma: 10, alpha: 10, delta: 'fast' })).toThrow(TypeError);
+      expect(() => validateConsumerSegment({ id: 'a', name: 'A', populationShare: 1, V: 500, beta: 1, gamma: 10, alpha: 10, delta: NaN })).toThrow(TypeError);
+      expect(() => validateConsumerSegment({ id: 'a', name: 'A', populationShare: 1, V: 500, beta: 1, gamma: 10, alpha: 10, delta: -1 })).toThrow(RangeError);
+      expect(validateConsumerSegment({ id: 'a', name: 'A', populationShare: 1, V: 500, beta: 1, gamma: 10, alpha: 10, delta: 0 })).toBe(true);
+      expect(validateConsumerSegment({ id: 'a', name: 'A', populationShare: 1, V: 500, beta: 1, gamma: 10, alpha: 10, delta: 3.5 })).toBe(true);
     });
   });
 
   describe('createConsumerSegment', () => {
-    it('creates and freezes a normalized segment with default values', () => {
+    it('creates and freezes a normalized segment with default values including delta', () => {
       const seg = createConsumerSegment({ id: 'students' });
       expect(seg).toEqual({
         id: 'students',
@@ -137,11 +154,12 @@ describe('LOCUS Frontier Engine — Phase 7B: Consumer Segments Model', () => {
         beta: 1,
         gamma: 10,
         alpha: 10,
+        delta: 1,
       });
       expect(Object.isFrozen(seg)).toBe(true);
     });
 
-    it('preserves explicitly supplied parameters', () => {
+    it('preserves explicitly supplied parameters including delta', () => {
       const seg = createConsumerSegment({
         id: 'seniors',
         name: 'Senior Citizens',
@@ -150,6 +168,7 @@ describe('LOCUS Frontier Engine — Phase 7B: Consumer Segments Model', () => {
         beta: 1.5,
         gamma: 12,
         alpha: 20,
+        delta: 2.0,
       });
       expect(seg).toEqual({
         id: 'seniors',
@@ -159,6 +178,7 @@ describe('LOCUS Frontier Engine — Phase 7B: Consumer Segments Model', () => {
         beta: 1.5,
         gamma: 12,
         alpha: 20,
+        delta: 2.0,
       });
     });
   });
@@ -169,12 +189,13 @@ describe('LOCUS Frontier Engine — Phase 7B: Consumer Segments Model', () => {
       expect(def).toEqual(DEFAULT_CONSUMER_SEGMENT);
     });
 
-    it('inherits market config overrides (V, beta, gamma, alpha)', () => {
+    it('inherits market config overrides (V, beta, gamma, alpha, delta)', () => {
       const custom = createDefaultConsumerSegment({
         V: 700,
         beta: 1.2,
         gamma: 15,
         alpha: 8,
+        delta: 3.0,
       });
       expect(custom).toEqual({
         id: 'general',
@@ -184,6 +205,7 @@ describe('LOCUS Frontier Engine — Phase 7B: Consumer Segments Model', () => {
         beta: 1.2,
         gamma: 15,
         alpha: 8,
+        delta: 3.0,
       });
     });
 
